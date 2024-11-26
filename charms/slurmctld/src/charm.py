@@ -10,6 +10,7 @@ import subprocess
 from typing import Any, Dict, List, Optional, Union
 
 from constants import CHARM_MAINTAINED_SLURM_CONF_PARAMETERS
+from interface_sackd import Sackd
 from interface_slurmd import (
     PartitionAvailableEvent,
     PartitionUnavailableEvent,
@@ -61,6 +62,7 @@ class SlurmctldCharm(CharmBase):
         )
 
         self._slurmctld = SlurmctldManager(snap=False)
+        self._sackd = Sackd(self, "login-node")
         self._slurmd = Slurmd(self, "slurmd")
         self._slurmdbd = Slurmdbd(self, "slurmdbd")
         self._slurmrestd = Slurmrestd(self, "slurmrestd")

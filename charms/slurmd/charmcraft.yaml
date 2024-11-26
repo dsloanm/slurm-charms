@@ -24,14 +24,10 @@ links:
 assumes:
   - juju
 
-bases:
-  - build-on:
-      - name: ubuntu
-        channel: "22.04"
-    run-on:
-      - name: ubuntu
-        channel: "22.04"
-        architectures: [amd64]
+base: ubuntu@24.04
+build-base: ubuntu@24.04
+platforms:
+  amd64:
 
 parts:
   charm:
