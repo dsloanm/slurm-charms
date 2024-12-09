@@ -103,7 +103,7 @@ class GPUDriverDetect():
             _logger.info("no GPUs detected")
             return
 
-        _logger.info("installing GPU driver packages: {install_packages}")
+        _logger.info(f"installing GPU driver packages: {install_packages}")
         try:
             apt.add_package(install_packages)
         except (apt.PackageNotFoundError, apt.PackageError) as e:
