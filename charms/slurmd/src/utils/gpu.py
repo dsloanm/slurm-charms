@@ -30,7 +30,7 @@ class GPUInstallError(Exception):
     """Exception raised when a GPU driver installation operation failed."""
 
 
-class GPUDriverDetect(self):
+class GPUDriverDetect():
     """GPU and accelerator card detection and driver installation."""
 
     def __init__(self, *args, **kwargs):
@@ -49,8 +49,8 @@ class GPUDriverDetect(self):
 
         # ubuntu-drivers requires apt_pkg for package operations
         self._apt_pkg = import_module("apt_pkg")
-        apt_pkg.init_config()
-        apt_pkg.init_system()
+        self._apt_pkg.init_config()
+        self._apt_pkg.init_system()
 
     def _system_gpgpu_driver_packages(self) -> dict:
         """Detects the available GPGPU drivers for this node."""
@@ -61,7 +61,7 @@ class GPUDriverDetect(self):
 
         e.g. linux-modules-nvidia-535-server-aws for driver nvidia-driver-535-server
         """
-        return self._detect.get_linux_modules_metapackage(apt_pkg.Cache(None), driver)
+        return self._detect.get_linux_modules_metapackage(self._apt_pkg.Cache(None), driver)
 
     def _system_packages(self) -> list:
         """Returns a list of GPU drivers and kernel module packages for this node."""
@@ -99,7 +99,7 @@ class GPUDriverDetect(self):
         _logger.info("detecting GPUs")
         install_packages = self._system_packages()
 
-        if len(packages == 0):
+        if len(install_packages) == 0:
             _logger.info("no GPUs detected")
             return
 
