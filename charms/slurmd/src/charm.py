@@ -5,6 +5,7 @@
 """Slurmd Operator Charm."""
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, cast
 
 from interface_slurmctld import Slurmctld, SlurmctldAvailableEvent
@@ -21,7 +22,7 @@ from ops import (
     main,
 )
 from slurmutils.models.option import NodeOptionSet, PartitionOptionSet
-from utils import machine, nhc, service
+from utils import gpu, machine, nhc, service
 
 from charms.hpc_libs.v0.slurm_ops import SlurmdManager, SlurmOpsError
 from charms.operator_libs_linux.v0.juju_systemd_notices import (  # type: ignore[import-untyped]
@@ -79,6 +80,7 @@ class SlurmdCharm(CharmBase):
         try:
             self._slurmd.install()
             nhc.install()
+            gpu.GPUDriverDetect().autoinstall()
             self.unit.set_workload_version(self._slurmd.version())
             # TODO: https://github.com/orgs/charmed-hpc/discussions/10 -
             #  Evaluate if we should continue doing the service override here
@@ -92,6 +94,7 @@ class SlurmdCharm(CharmBase):
             event.defer()
 
         self._check_status()
+        self._reboot_if_required()
 
     def _on_config_changed(self, _: ConfigChangedEvent) -> None:
         """Handle charm configuration changes."""
@@ -320,6 +323,12 @@ class SlurmdCharm(CharmBase):
         #     return False
 
         return True
+
+    def _reboot_if_required(self) -> None:
+        """Perform a reboot of the unit if required, e.g. following a package installation"""
+        if Path("/var/run/reboot-required").exists():
+            logger.info("unit rebooting")
+            self.unit.reboot()
 
     def get_node(self) -> Dict[Any, Any]:
         """Get the node from stored state."""
