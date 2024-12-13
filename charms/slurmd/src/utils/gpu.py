@@ -36,12 +36,13 @@ class GPUDriverDetect():
     def __init__(self, *args, **kwargs):
         """Initialise detection attributes and interfaces."""
         # Install ubuntu-drivers tool if unavailable.
+        # TODO: try->fail->install is a bad pattern. Find an alternative.
         try:
             self._detect = import_module("UbuntuDrivers.detect")
         except ModuleNotFoundError:
             try:
                 apt.update()
-                apt.add_package("ubuntu-drivers-common")
+                apt.add_package(["ubuntu-drivers-common", "python3-nvml")
             except (apt.PackageNotFoundError, apt.PackageError) as e:
                 raise GPUInstallError(f"failed to install 'ubuntu-drivers-common'. reason: {e}")
 
@@ -87,6 +88,8 @@ class GPUDriverDetect():
 
         # TODO: do we want to check for nvidia here and add nvidia-fabricmanager-535 libnvidia-nscq-535 in case of nvlink? This is suggested as a manual step at https://documentation.ubuntu.com/server/how-to/graphics/install-nvidia-drivers/#optional-step. If so, how do we get the version number "-535" robustly?
 
+        # TODO: what if drivers install but do not require a reboot? Should we "modprobe nvidia" manually? Just always reboot regardless?
+
         # Filter out any empty results as returning
         return [p for p in install_packages if p]
 
@@ -108,3 +111,75 @@ class GPUDriverDetect():
             apt.add_package(install_packages)
         except (apt.PackageNotFoundError, apt.PackageError) as e:
             raise GPUInstallError(f"failed to install packages {install_packages}. reason: {e}")
+
+    # Subprocess attempt below
+    # def __init__(self, *args, **kwargs):
+    #     """Initialise detection attributes and interfaces."""
+    #     # Install ubuntu-drivers tool if unavailable.
+    #     # TODO: try->fail->install is a bad pattern. Find an alternative.
+    #     pkgs = ["ubuntu-drivers-common", "python3-nvml"]
+    #     try:
+    #         apt.update()
+    #         apt.add_package(pkgs)
+    #     except (apt.PackageNotFoundError, apt.PackageError) as e:
+    #         raise GPUInstallError(f"failed to install {pkgs} reason: {e}")
+    #
+    # def autoinstall(self) -> None:
+    #     """Autodetect available GPUs and install drivers.
+    #
+    #     Raises:
+    #         TODO:
+    #     """
+    #     _logger.info("detecting GPUs and installing any appropriate drivers")
+    #
+    #     # TODO: can we use the API given the licence?
+    #     # TODO: handle install failures
+    #     r = subprocess.check_output(["ubuntu-drivers", "install", "--gpgpu", "--recommended"], stderr=subprocess.STDOUT, text=True)
+    #
+    #     # TODO: do we want this?
+    #     #if r == 'No drivers found for installation.\n':
+    #     #    _logger.info("no GPUs detected")
+    #
+    #     # TODO: do we want to install nvidia-fabricmanager-535 libnvidia-nscq-535 in case of nvlink? This is suggested as a manual step at https://documentation.ubuntu.com/server/how-to/graphics/install-nvidia-drivers/#optional-step. If so, how do we get the version number "-535" robustly?
+    #
+    #     # TODO: what if drivers install but do not require a reboot? Should we "modprobe nvidia" manually? Just always reboot regardless?
+
+    def get_gpus() -> dict:
+        """Returns the GPU devices on this node.
+           TODO: Details of return type - dictionary with model name as its key.
+        """
+        # TODO:
+        #   * Add "NodeName=<nodename> Gres=gpu:<type>:<count>", e.g. "Gres=gpu:tesla:1" to node definition in slurm.conf
+        #   * Add "Name=gpu Type=tesla File=/dev/nvidia0" to gres.conf
+        #   * Add "gpu" to AccountingStorageTRES - check this.
+        #   * For model names, "_".join(model.split()).lower, e.g. "Tesla T4" -> "Gres=gpu:tesla_t4:1"
+
+        # Detect only Nvidia GPUs at the moment
+        import pvnvml
+        pynvml.nvmlInit
+
+        gpu_count = pvnvml.nvmlDeviceGetCount()
+        gpu_info = {}
+        # Loop over all detected GPUs, gathering info
+        for i in range(gpu_count):
+            handle = pynvml.nvmlDevieGetHandleByIndex(i)
+
+            # Make model name lowercase and replace whitespace with underscores to turn into GRES-compatible format,
+            # e.g. "Tesla T4" -> "tesla_t4", which can be added as "Gres=gpu:tesla_t4:1"
+            # Looks to follow convention set by Slurm autodetect:
+            # https://slurm.schedmd.com/gres.html#AutoDetect
+            model = pynvml.nvmlDeviceGetName(handle)
+            model =  "_".join(model.split()).lower()
+
+            # Number for device path, e.g. if device is /dev/nvidia0, returns 0
+            minor_number = pynvml.nvmlDeviceGetMinorNumber(handle)
+
+            try:
+                # Add device file to list of existing device files for this model.
+                gpu_info[model].add(minor_number)
+            except KeyError:
+                # This is the first time we've seen this model. Create a new entry.
+                gpu_info[model] = set([minor_number])
+
+        pynvml.nvmlShutdown()
+        return gpu_info

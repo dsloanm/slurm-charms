@@ -4,6 +4,7 @@
 
 """Slurmd Operator Charm."""
 
+import itertools
 import logging
 from pathlib import Path
 from typing import Any, Dict, cast
@@ -330,11 +331,42 @@ class SlurmdCharm(CharmBase):
             logger.info("unit rebooting")
             self.unit.reboot()
 
+    @staticmethod
+    def _ranges_and_strides(nums) -> str:
+        """TODO: explain this. Requires input elements to be unique and sorted ascending."""
+        out = "["
+
+        for _, group in itertools.groupby(enumerate(nums), lambda pair: pair[1] - pair[0]):
+            group = list(group)
+            if group[0][1] == group[-1][1]:
+                out += f"{group[0][1]},"
+            else:
+                out += f"{group[0][1]}-{group[-1][1]},"
+
+        out = out.rstrip(",") + "]"
+        return out
+
     def get_node(self) -> Dict[Any, Any]:
         """Get the node from stored state."""
+        slurmd_info = machine.get_slurmd_info()
+
+        # Get GPU info and build GRES configuration.
+        if gpus := gpu.get_gpus():
+            for model, devices in gpus.items():
+
+                # Add to node parameters to ensure included in slurm.conf.
+                # Format is "Gres=gpu:model_name:count,gpu:model_name2:count,...".
+                slurm_conf_gres = f"gpu:{model}:{len(devices)}"
+                try:
+                    # Add to existing Gres line
+                    slurmd_info["Gres"] += f",{slurm_conf_gres}"
+                except KeyError:
+                    # Create a new Gres entry if none present
+                    slurmd_info["Gres"] = slurm_conf_gres
+
         node = {
             "node_parameters": {
-                **machine.get_slurmd_info(),
+                **slurmd_info,
                 "MemSpecLimit": "1024",
                 **self._user_supplied_node_parameters,
             },
