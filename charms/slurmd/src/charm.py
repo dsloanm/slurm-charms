@@ -81,7 +81,7 @@ class SlurmdCharm(CharmBase):
         try:
             self._slurmd.install()
             nhc.install()
-            gpu.GPUDriverDetect().autoinstall()
+            gpu.autoinstall()
             self.unit.set_workload_version(self._slurmd.version())
             # TODO: https://github.com/orgs/charmed-hpc/discussions/10 -
             #  Evaluate if we should continue doing the service override here
@@ -326,7 +326,7 @@ class SlurmdCharm(CharmBase):
         return True
 
     def _reboot_if_required(self) -> None:
-        """Perform a reboot of the unit if required, e.g. following a package installation"""
+        """Perform a reboot of the unit if required, e.g. following a package installation."""
         if Path("/var/run/reboot-required").exists():
             logger.info("unit rebooting")
             self.unit.reboot()
@@ -334,8 +334,9 @@ class SlurmdCharm(CharmBase):
     @staticmethod
     def _ranges_and_strides(nums) -> str:
         """TODO: explain this. Requires input elements to be unique and sorted ascending.
-            example_input  = set([0,1,2,3,4,5,6,8,9,10,12,14,15,16,18])
-            example_output = '[0-6,8-10,12,14-16,18]'
+
+        example_input  = set([0,1,2,3,4,5,6,8,9,10,12,14,15,16,18])
+        example_output = '[0-6,8-10,12,14-16,18]'
         """
         out = "["
 
@@ -367,7 +368,7 @@ class SlurmdCharm(CharmBase):
             for model, devices in gpus.items():
                 # Build gres.conf line for this GPU model.
                 if len(devices) == 1:
-                    device_suffix = devices[0]
+                    device_suffix = next(iter(devices))
                 else:
                     # For multi-gpu setups, "File" uses ranges and strides syntax,
                     # e.g. File=/dev/nvidia[0-3], File=/dev/nvidia[0,2-3]
@@ -399,7 +400,7 @@ class SlurmdCharm(CharmBase):
             },
             "new_node": self._new_node,
             # Do not include GRES configuration if no GPUs detected.
-            **({"gres": gres_info} if len(gres_info) > 0 else {})
+            **({"gres": gres_info} if len(gres_info) > 0 else {}),
         }
         logger.debug(f"Node Configuration: {node}")
         return node

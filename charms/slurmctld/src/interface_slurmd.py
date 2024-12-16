@@ -54,6 +54,7 @@ class SlurmdAvailableEvent(EventBase):
         self.node_name = snapshot.get("node_name")
         self.gres_info = snapshot.get("gres_info")
 
+
 class SlurmdDepartedEvent(EventBase):
     """Emitted when one slurmd departs."""
 
@@ -146,7 +147,9 @@ class Slurmd(Object):
                     if node_config := node.get("node_parameters"):
                         if node_name := node_config.get("NodeName"):
                             self._charm.new_nodes = list(set(self._charm.new_nodes + [node_name]))
-                            self.on.slurmd_available.emit(node_name=node_name, gres_info=node_config.get("gres"))
+                            self.on.slurmd_available.emit(
+                                node_name=node_name, gres_info=node.get("gres")
+                            )
             else:
                 logger.debug(f"`node` data does not exist for unit: {unit}.")
         else:

@@ -87,7 +87,7 @@ class SlurmctldCharm(CharmBase):
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
             self._slurmd.on.partition_unavailable: self._on_write_slurm_conf,
-            self._slurmd.on.slurmd_available: self._on_write_slurm_conf,
+            self._slurmd.on.slurmd_available: self._on_slurmd_available,
             self._slurmd.on.slurmd_departed: self._on_write_slurm_conf,
             self._slurmrestd.on.slurmrestd_available: self._on_slurmrestd_available,
             self.on.show_current_config_action: self._on_show_current_config_action,
@@ -215,6 +215,7 @@ class SlurmctldCharm(CharmBase):
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
     def _on_slurmd_available(self, event: SlurmdAvailableEvent) -> None:
+        logger.debug(f"_on_slurmd_available event: {event}")
         self._on_write_gres_conf(event)
         self._on_write_slurm_conf(event)
 
@@ -230,12 +231,14 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
+        logger.debug(f"_on_write_gres_conf event: {event.gres_info}")
         if gres_info := event.gres_info:
             node_name = event.node_name
-            # List of dictionaries with Gres info
+            # List of dictionaries with Gres info.
             with self._slurmctld.gres.edit() as config:
                 # TODO: THIS DOES NOT WORK FOR MULTIPLE GRES TYPES! nodes.update() will overwrite with the last entry since NodeName is used as the dictionary key. Need to fix assumption that there's only one line per NodeName.
                 for resource in gres_info:
+                    logger.debug(f"_on_write_gres_conf updating with: {node_name} = {resource}")
                     config.nodes.update({node_name: resource})
 
     def _on_write_slurm_conf(
