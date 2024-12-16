@@ -214,6 +214,30 @@ class SlurmctldCharm(CharmBase):
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
+    def _on_slurmd_available(self, event: SlurmdAvailableEvent) -> None:
+        self._on_write_gres_conf(event)
+        self._on_write_slurm_conf(event)
+
+    def _on_write_gres_conf(self, event: SlurmdAvailableEvent) -> None:
+        """Write gres.conf configuration file for Generic Resource scheduling."""
+        # Only the leader should write the config. This function does not perform an
+        # "scontrol reconfigure". It is expected _on_write_slurm_conf() is called
+        # immediately after and does this.
+        if not self.model.unit.is_leader():
+            return
+
+        if not self._check_status():
+            event.defer()
+            return
+
+        if gres_info := event.gres_info:
+            node_name = event.node_name
+            # List of dictionaries with Gres info
+            with self._slurmctld.gres.edit() as config:
+                # TODO: THIS DOES NOT WORK FOR MULTIPLE GRES TYPES! nodes.update() will overwrite with the last entry since NodeName is used as the dictionary key. Need to fix assumption that there's only one line per NodeName.
+                for resource in gres_info:
+                    config.nodes.update({node_name: resource})
+
     def _on_write_slurm_conf(
         self,
         event: Union[

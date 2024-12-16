@@ -31,6 +31,28 @@ class PartitionUnavailableEvent(EventBase):
 class SlurmdAvailableEvent(EventBase):
     """Emitted when the slurmd unit joins the relation."""
 
+    def __init__(
+        self,
+        handle,
+        node_name,
+        gres_info=None,
+    ):
+        super().__init__(handle)
+
+        self.node_name = node_name
+        self.gres_info = gres_info
+
+    def snapshot(self):
+        """Snapshot the event data."""
+        return {
+            "node_name": self.node_name,
+            "gres_info": self.gres_info,
+        }
+
+    def restore(self, snapshot):
+        """Restore the snapshot of the event data."""
+        self.node_name = snapshot.get("node_name")
+        self.gres_info = snapshot.get("gres_info")
 
 class SlurmdDepartedEvent(EventBase):
     """Emitted when one slurmd departs."""
@@ -124,7 +146,7 @@ class Slurmd(Object):
                     if node_config := node.get("node_parameters"):
                         if node_name := node_config.get("NodeName"):
                             self._charm.new_nodes = list(set(self._charm.new_nodes + [node_name]))
-                            self.on.slurmd_available.emit()
+                            self.on.slurmd_available.emit(node_name=node_name, gres_info=node_config.get("gres"))
             else:
                 logger.debug(f"`node` data does not exist for unit: {unit}.")
         else:
@@ -170,6 +192,19 @@ class Slurmd(Object):
         return partition_as_dict
 
     def _get_node_from_relation(self, relation: Relation, unit: Unit) -> Dict[str, Any]:
+        """Decode and return the node from the unit data on the relation."""
+        node_as_dict = {}
+        if node := relation.data[unit].get("node"):
+            # Load the node
+            try:
+                node_as_dict = json.loads(node)
+            except json.JSONDecodeError as e:
+                logger.error(e)
+                raise e
+
+        return node_as_dict
+
+    def _get_gres_from_relation(self, relation: Relation, unit: Unit) -> Dict[str, Any]:
         """Decode and return the node from the unit data on the relation."""
         node_as_dict = {}
         if node := relation.data[unit].get("node"):

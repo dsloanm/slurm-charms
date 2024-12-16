@@ -218,7 +218,7 @@ class SlurmdCharm(CharmBase):
             event.set_results({"nhc.conf": "/etc/nhc/nhc.conf not found."})
 
     def _on_node_config_action_event(self, event: ActionEvent) -> None:
-        """Get or set the user_supplied_node_conifg.
+        """Get or set the user_supplied_node_config.
 
         Return the node config if the `node-config` parameter is not specified, otherwise
         parse, validate, and store the input of the `node-config` parameter in stored state.
@@ -333,14 +333,25 @@ class SlurmdCharm(CharmBase):
 
     @staticmethod
     def _ranges_and_strides(nums) -> str:
-        """TODO: explain this. Requires input elements to be unique and sorted ascending."""
+        """TODO: explain this. Requires input elements to be unique and sorted ascending.
+            example_input  = set([0,1,2,3,4,5,6,8,9,10,12,14,15,16,18])
+            example_output = '[0-6,8-10,12,14-16,18]'
+        """
         out = "["
 
-        for _, group in itertools.groupby(enumerate(nums), lambda pair: pair[1] - pair[0]):
+        # The input is enumerate()-ed to produce a list of tuples of the elements and their indices.
+        # groupby() uses the key function to group these tuples by the difference between the element and index.
+        # Consecutive values have equal difference between element and index, so are grouped together.
+        # Hence, the elements of the first and last members of each group give the range of consecutive values.
+        # If the group has only a single member, there are no consecutive values either side of it (a "stride").
+        for _, group in itertools.groupby(enumerate(nums), lambda elems: elems[1] - elems[0]):
             group = list(group)
-            if group[0][1] == group[-1][1]:
+
+            if len(group) == 1:
+                # Single member, this is a stride.
                 out += f"{group[0][1]},"
             else:
+                # Range of consecutive values is first-last in group.
                 out += f"{group[0][1]}-{group[-1][1]},"
 
         out = out.rstrip(",") + "]"
@@ -351,8 +362,24 @@ class SlurmdCharm(CharmBase):
         slurmd_info = machine.get_slurmd_info()
 
         # Get GPU info and build GRES configuration.
+        gres_info = []
         if gpus := gpu.get_gpus():
             for model, devices in gpus.items():
+                # Build gres.conf line for this GPU model.
+                if len(devices) == 1:
+                    device_suffix = devices[0]
+                else:
+                    # For multi-gpu setups, "File" uses ranges and strides syntax,
+                    # e.g. File=/dev/nvidia[0-3], File=/dev/nvidia[0,2-3]
+                    device_suffix = self._ranges_and_strides(devices)
+                gres_line = {
+                    # NodeName included in node_parameters.
+                    "Name": "gpu",
+                    "Type": model,
+                    "File": f"/dev/nvidia{device_suffix}",
+                }
+                # Append to list of GRES lines for all models
+                gres_info.append(gres_line)
 
                 # Add to node parameters to ensure included in slurm.conf.
                 # Format is "Gres=gpu:model_name:count,gpu:model_name2:count,...".
@@ -371,6 +398,8 @@ class SlurmdCharm(CharmBase):
                 **self._user_supplied_node_parameters,
             },
             "new_node": self._new_node,
+            # Do not include GRES configuration if no GPUs detected.
+            **({"gres": gres_info} if len(gres_info) > 0 else {})
         }
         logger.debug(f"Node Configuration: {node}")
         return node
