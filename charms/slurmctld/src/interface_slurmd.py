@@ -208,19 +208,6 @@ class Slurmd(Object):
 
         return node_as_dict
 
-    def _get_gres_from_relation(self, relation: Relation, unit: Unit) -> Dict[str, Any]:
-        """Decode and return the node from the unit data on the relation."""
-        node_as_dict = {}
-        if node := relation.data[unit].get("node"):
-            # Load the node
-            try:
-                node_as_dict = json.loads(node)
-            except json.JSONDecodeError as e:
-                logger.error(e)
-                raise e
-
-        return node_as_dict
-
     def get_new_nodes_and_nodes_and_partitions(self) -> Dict[str, Any]:
         """Return the new_nodes, nodes and partitions configuration.
 
