@@ -341,7 +341,7 @@ class SlurmdCharm(CharmBase):
         out = "["
 
         # The input is enumerate()-ed to produce a list of tuples of the elements and their indices.
-        # groupby() uses the key function to group these tuples by the difference between the element and index.
+        # groupby() uses the lambda key function to group these tuples by the difference between the element and index.
         # Consecutive values have equal difference between element and index, so are grouped together.
         # Hence, the elements of the first and last members of each group give the range of consecutive values.
         # If the group has only a single member, there are no consecutive values either side of it (a "stride").
@@ -384,13 +384,20 @@ class SlurmdCharm(CharmBase):
 
                 # Add to node parameters to ensure included in slurm.conf.
                 # Format is "Gres=gpu:model_name:count,gpu:model_name2:count,...".
+                # We want to send list of strings: ["gpu:model_name:count", "gpu:model_name2:count", ...]
+                # as this is the format slurmutils expects when writing to slurm.conf.
                 slurm_conf_gres = f"gpu:{model}:{len(devices)}"
                 try:
                     # Add to existing Gres line
-                    slurmd_info["Gres"] += f",{slurm_conf_gres}"
+                    slurmd_info["Gres"].append(slurm_conf_gres)
                 except KeyError:
                     # Create a new Gres entry if none present
-                    slurmd_info["Gres"] = slurm_conf_gres
+                    slurmd_info["Gres"] = [slurm_conf_gres]
+                except AttributeError:
+                    # If existing Gres line is a comma-separated string, split into list of strings.
+                    # Handled as machine.get_slurmd_info() may return this format.
+                    # TODO: handle outside of GPU branch? What if machine.get_slurmd_info() gives a comma-separated Gres on a non-GPU node?
+                    slurmd_info["Gres"] = slurmd_info["Gres"].split(",") + [slurm_conf_gres]
 
         node = {
             "node_parameters": {

@@ -150,6 +150,7 @@ class Slurmd(Object):
                             self.on.slurmd_available.emit(
                                 node_name=node_name, gres_info=node.get("gres")
                             )
+                            logger.debug(f"_on_relation_changed node_config = {node_config}")
             else:
                 logger.debug(f"`node` data does not exist for unit: {unit}.")
         else:
@@ -257,10 +258,21 @@ class Slurmd(Object):
                                 node_name = node_config["NodeName"]
                                 partition_nodes.append(node_name)
 
+                                logger.debug(
+                                    f"get_new_nodes_and_nodes_and_partitions node_config = {node_config}"
+                                )
+                                logger.debug(
+                                    f"get_new_nodes_and_nodes_and_partitions BEFORE nodes = {nodes}"
+                                )
+
                                 # Add this node config to the nodes dict.
                                 nodes[node_name] = {
                                     k: v for k, v in node_config.items() if k not in ["NodeName"]
                                 }
+
+                                logger.debug(
+                                    f"get_new_nodes_and_nodes_and_partitions AFTER nodes = {nodes}"
+                                )
 
                                 # Account for new node.
                                 if node.get("new_node"):

@@ -221,9 +221,9 @@ class SlurmctldCharm(CharmBase):
 
     def _on_write_gres_conf(self, event: SlurmdAvailableEvent) -> None:
         """Write gres.conf configuration file for Generic Resource scheduling."""
-        # Only the leader should write the config. This function does not perform an
-        # "scontrol reconfigure". It is expected _on_write_slurm_conf() is called
-        # immediately after and does this.
+        # Only the leader should write the config.
+        # This function does not perform an "scontrol reconfigure". It is expected
+        # _on_write_slurm_conf() is called immediately following to do this.
         if not self.model.unit.is_leader():
             return
 
@@ -310,6 +310,7 @@ class SlurmctldCharm(CharmBase):
         user_supplied_parameters = self._get_user_supplied_parameters()
 
         slurmd_parameters = self._slurmd.get_new_nodes_and_nodes_and_partitions()
+        logger.debug(f"slurmd_parameters = {slurmd_parameters}")
 
         def _assemble_slurmctld_parameters() -> dict[str, Any]:
             # Preprocess merging slurmctld_parameters if they exist in the context
