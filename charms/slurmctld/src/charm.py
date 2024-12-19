@@ -37,7 +37,7 @@ from ops import (
     WaitingStatus,
     main,
 )
-from slurmutils.models import CgroupConfig, SlurmConfig
+from slurmutils.models import CgroupConfig, GresConfig, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 from charms.hpc_libs.v0.is_container import is_container
@@ -88,7 +88,7 @@ class SlurmctldCharm(CharmBase):
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
             self._slurmd.on.partition_unavailable: self._on_write_slurm_conf,
             self._slurmd.on.slurmd_available: self._on_slurmd_available,
-            self._slurmd.on.slurmd_departed: self._on_write_slurm_conf,
+            self._slurmd.on.slurmd_departed:  self._on_slurmd_departed,
             self._slurmrestd.on.slurmrestd_available: self._on_slurmrestd_available,
             self.on.show_current_config_action: self._on_show_current_config_action,
             self.on.drain_action: self._on_drain_nodes_action,
@@ -215,12 +215,17 @@ class SlurmctldCharm(CharmBase):
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
     def _on_slurmd_available(self, event: SlurmdAvailableEvent) -> None:
-        logger.debug(f"_on_slurmd_available event: {event}")
-        self._on_write_gres_conf(event)
+        self._add_to_gres_conf(event)
         self._on_write_slurm_conf(event)
 
-    def _on_write_gres_conf(self, event: SlurmdAvailableEvent) -> None:
-        """Write gres.conf configuration file for Generic Resource scheduling."""
+    def _on_slurmd_departed(self, event: SlurmdDepartedEvent) -> None:
+        # No way to map departing unit to NodeName complicates removal of node from gres.conf.
+        # Instead, rewrite entire gres.conf with data from remaining units.
+        self._write_gres_conf(event)
+        self._on_write_slurm_conf(event)
+
+    def _add_to_gres_conf(self, event: SlurmdAvailableEvent) -> None:
+        """Write new nodes to gres.conf configuration file for Generic Resource scheduling."""
         # Only the leader should write the config.
         # This function does not perform an "scontrol reconfigure". It is expected
         # _on_write_slurm_conf() is called immediately following to do this.
@@ -231,15 +236,32 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
-        logger.debug(f"_on_write_gres_conf event: {event.gres_info}")
         if gres_info := event.gres_info:
-            node_name = event.node_name
-            # List of dictionaries with Gres info.
+            # Update existing node list with list of dictionaries containing Gres info.
             with self._slurmctld.gres.edit() as config:
                 # TODO: THIS DOES NOT WORK FOR MULTIPLE GRES TYPES! nodes.update() will overwrite with the last entry since NodeName is used as the dictionary key. Need to fix assumption that there's only one line per NodeName.
                 for resource in gres_info:
-                    logger.debug(f"_on_write_gres_conf updating with: {node_name} = {resource}")
-                    config.nodes.update({node_name: resource})
+                    config.nodes.update({event.node_name: resource})
+
+    def _write_gres_conf(self, event: SlurmdDepartedEvent) -> None:
+        """Write out current gres.conf configuration file for Generic Resource scheduling."""
+        # Only the leader should write the config.
+        # This function does not perform an "scontrol reconfigure". It is expected
+        # _on_write_slurm_conf() is called immediately following to do this.
+        if not self.model.unit.is_leader():
+            return
+
+        if not self._check_status():
+            event.defer()
+            return
+
+        if gres_info := event.gres_info:
+            # Delete departing node info
+            with self._slurmctld.gres.edit() as config:
+                try:
+                    del config.nodes[event.node_name]
+                except KeyError as e:
+                    logger.warning(f"failed to remove node {event.node_name} from Gres configuration. reason: {e}")
 
     def _on_write_slurm_conf(
         self,

@@ -333,10 +333,15 @@ class SlurmdCharm(CharmBase):
 
     @staticmethod
     def _ranges_and_strides(nums) -> str:
-        """TODO: explain this. Requires input elements to be unique and sorted ascending.
+        """Return ranges and strides for given iterable.
 
-        example_input  = set([0,1,2,3,4,5,6,8,9,10,12,14,15,16,18])
-        example_output = '[0-6,8-10,12,14-16,18]'
+        Requires input elements to be unique and sorted ascending.
+
+        Returns:
+            A square-bracketed string with comma-separated ranges of consecutive values.
+
+            example_input  = [0,1,2,3,4,5,6,8,9,10,12,14,15,16,18]
+            example_output = '[0-6,8-10,12,14-16,18]'
         """
         out = "["
 
@@ -372,7 +377,7 @@ class SlurmdCharm(CharmBase):
                 else:
                     # For multi-gpu setups, "File" uses ranges and strides syntax,
                     # e.g. File=/dev/nvidia[0-3], File=/dev/nvidia[0,2-3]
-                    device_suffix = self._ranges_and_strides(devices)
+                    device_suffix = self._ranges_and_strides(sorted(devices))
                 gres_line = {
                     # NodeName included in node_parameters.
                     "Name": "gpu",
@@ -383,21 +388,14 @@ class SlurmdCharm(CharmBase):
                 gres_info.append(gres_line)
 
                 # Add to node parameters to ensure included in slurm.conf.
-                # Format is "Gres=gpu:model_name:count,gpu:model_name2:count,...".
-                # We want to send list of strings: ["gpu:model_name:count", "gpu:model_name2:count", ...]
-                # as this is the format slurmutils expects when writing to slurm.conf.
                 slurm_conf_gres = f"gpu:{model}:{len(devices)}"
                 try:
-                    # Add to existing Gres line
-                    slurmd_info["Gres"].append(slurm_conf_gres)
+                    # Add to existing Gres line.
+                    if isinstance(slurmd_info["Gres"], list):
+                        slurmd_info["Gres"].append(slurm_conf_gres)
                 except KeyError:
                     # Create a new Gres entry if none present
                     slurmd_info["Gres"] = [slurm_conf_gres]
-                except AttributeError:
-                    # If existing Gres line is a comma-separated string, split into list of strings.
-                    # Handled as machine.get_slurmd_info() may return this format.
-                    # TODO: handle outside of GPU branch? What if machine.get_slurmd_info() gives a comma-separated Gres on a non-GPU node?
-                    slurmd_info["Gres"] = slurmd_info["Gres"].split(",") + [slurm_conf_gres]
 
         node = {
             "node_parameters": {

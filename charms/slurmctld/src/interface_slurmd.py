@@ -31,14 +31,8 @@ class PartitionUnavailableEvent(EventBase):
 class SlurmdAvailableEvent(EventBase):
     """Emitted when the slurmd unit joins the relation."""
 
-    def __init__(
-        self,
-        handle,
-        node_name,
-        gres_info=None,
-    ):
+    def __init__(self, handle, node_name, gres_info=None):
         super().__init__(handle)
-
         self.node_name = node_name
         self.gres_info = gres_info
 
@@ -245,21 +239,10 @@ class Slurmd(Object):
                                 node_name = node_config["NodeName"]
                                 partition_nodes.append(node_name)
 
-                                logger.debug(
-                                    f"get_new_nodes_and_nodes_and_partitions node_config = {node_config}"
-                                )
-                                logger.debug(
-                                    f"get_new_nodes_and_nodes_and_partitions BEFORE nodes = {nodes}"
-                                )
-
                                 # Add this node config to the nodes dict.
                                 nodes[node_name] = {
                                     k: v for k, v in node_config.items() if k not in ["NodeName"]
                                 }
-
-                                logger.debug(
-                                    f"get_new_nodes_and_nodes_and_partitions AFTER nodes = {nodes}"
-                                )
 
                                 # Account for new node.
                                 if node.get("new_node"):
