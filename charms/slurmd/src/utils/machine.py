@@ -16,12 +16,12 @@
 
 import logging
 import subprocess
-from typing import Dict, List, Union
+from typing import Any, Dict
 
 _logger = logging.getLogger(__name__)
 
 
-def get_slurmd_info() -> Dict[str, str | List[str]]:
+def get_slurmd_info() -> Dict[str, Any]:
     """Get machine info as reported by `slurmd -C`."""
     try:
         r = subprocess.check_output(["slurmd", "-C"], text=True).strip()

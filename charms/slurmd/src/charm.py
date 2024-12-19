@@ -391,8 +391,7 @@ class SlurmdCharm(CharmBase):
                 slurm_conf_gres = f"gpu:{model}:{len(devices)}"
                 try:
                     # Add to existing Gres line.
-                    if isinstance(slurmd_info["Gres"], list):
-                        slurmd_info["Gres"].append(slurm_conf_gres)
+                    slurmd_info["Gres"].append(slurm_conf_gres)
                 except KeyError:
                     # Create a new Gres entry if none present
                     slurmd_info["Gres"] = [slurm_conf_gres]

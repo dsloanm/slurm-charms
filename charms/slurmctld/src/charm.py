@@ -37,7 +37,7 @@ from ops import (
     WaitingStatus,
     main,
 )
-from slurmutils.models import CgroupConfig, GresConfig, SlurmConfig
+from slurmutils.models import CgroupConfig, GRESConfig, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 from charms.hpc_libs.v0.is_container import is_container
@@ -88,7 +88,7 @@ class SlurmctldCharm(CharmBase):
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
             self._slurmd.on.partition_unavailable: self._on_write_slurm_conf,
             self._slurmd.on.slurmd_available: self._on_slurmd_available,
-            self._slurmd.on.slurmd_departed:  self._on_slurmd_departed,
+            self._slurmd.on.slurmd_departed: self._on_slurmd_departed,
             self._slurmrestd.on.slurmrestd_available: self._on_slurmrestd_available,
             self.on.show_current_config_action: self._on_show_current_config_action,
             self.on.drain_action: self._on_drain_nodes_action,
@@ -255,13 +255,15 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
-        if gres_info := event.gres_info:
-            # Delete departing node info
-            with self._slurmctld.gres.edit() as config:
-                try:
-                    del config.nodes[event.node_name]
-                except KeyError as e:
-                    logger.warning(f"failed to remove node {event.node_name} from Gres configuration. reason: {e}")
+        # Get current GRES state for all related nodes and write to gres.conf.
+        gres_all_nodes = self._slurmd.get_gres()
+
+        # TODO: FIX THIS HACK! Temporarily remove all but the last GRES device while slurmutils is rewritten to support multi-NodeName lines
+        for key in gres_all_nodes:
+            gres_all_nodes[key] = gres_all_nodes[key][-1]
+
+        gres_conf = GRESConfig(Nodes=gres_all_nodes)
+        self._slurmctld.gres.dump(gres_conf)
 
     def _on_write_slurm_conf(
         self,

@@ -265,3 +265,26 @@ class Slurmd(Object):
             else []
         )
         return {"DownNodes": new_node_down_nodes, "Nodes": nodes, "Partitions": partitions}
+
+    def get_gres(self) -> Dict[str, Any]:
+        """Return GRES configuration for all currently related compute nodes."""
+        # Loop over all relation units, gathering GRES info.
+        import pdb
+
+        pdb.set_trace()
+        gres_info = {}
+        if relations := self.framework.model.relations.get(self._relation_name):
+            for relation in relations:
+                for unit in relation.units:
+
+                    if node := self._get_node_from_relation(relation, unit):
+                        # Ignore nodes without GRES devices
+                        if (gres := node.get("gres")) and (
+                            node_config := node.get("node_parameters")
+                        ):
+
+                            # Index by node name.
+                            node_name = node_config["NodeName"]
+                            gres_info[node_name] = gres
+
+        return gres_info
