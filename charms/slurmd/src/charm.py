@@ -92,7 +92,7 @@ class SlurmdCharm(CharmBase):
             nhc.install()
             rdma.install()
 
-            self.unit.status = MaintenanceStatus("auto-detecting GPUs")
+            self.unit.status = MaintenanceStatus("detecting GPUs, installing drivers as needed")
             gpu.autoinstall()
 
             self.unit.set_workload_version(self._slurmd.version())
