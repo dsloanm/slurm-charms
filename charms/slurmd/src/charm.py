@@ -23,7 +23,7 @@ from ops import (
 )
 from slurmutils import calculate_rs
 from slurmutils.models.option import NodeOptionSet, PartitionOptionSet
-from utils import gpu, machine, nhc, service
+from utils import gpu, machine, nhc, rdma, service
 
 from charms.hpc_libs.v0.slurm_ops import SlurmdManager, SlurmOpsError
 from charms.operator_libs_linux.v0.juju_systemd_notices import (  # type: ignore[import-untyped]
@@ -87,6 +87,7 @@ class SlurmdCharm(CharmBase):
         try:
             self._slurmd.install()
             nhc.install()
+            rdma.install()
             gpu.autoinstall()
             self.unit.set_workload_version(self._slurmd.version())
             # TODO: https://github.com/orgs/charmed-hpc/discussions/10 -
