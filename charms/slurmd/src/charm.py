@@ -92,8 +92,12 @@ class SlurmdCharm(CharmBase):
             nhc.install()
             rdma.install()
 
-            self.unit.status = MaintenanceStatus("detecting GPUs, installing drivers as needed")
-            gpu.autoinstall()
+            self.unit.status = MaintenanceStatus("detecting if machine is GPU-equipped")
+            installed_packages = gpu.autoinstall()
+            if len(installed_packages) > 0:
+                self.unit.status = MaintenanceStatus("successfully installed GPU drivers")
+            else:
+                self.unit.status = MaintenanceStatus("no GPUs found. continuing")
 
             self.unit.set_workload_version(self._slurmd.version())
             # TODO: https://github.com/orgs/charmed-hpc/discussions/10 -
@@ -103,7 +107,7 @@ class SlurmdCharm(CharmBase):
             self._systemd_notices.subscribe()
 
             self._stored.slurm_installed = True
-        except SlurmOpsError as e:
+        except (SlurmOpsError, gpu.GPUOpsError) as e:
             logger.error(e.message)
             event.defer()
 
@@ -317,9 +321,7 @@ class SlurmdCharm(CharmBase):
         - munge key configured and working
         """
         if self._stored.slurm_installed is not True:
-            self.unit.status = BlockedStatus(
-                "failed to install slurmd. see logs for further details"
-            )
+            self.unit.status = BlockedStatus("install failed. see logs for further details")
             return False
 
         if self._slurmctld.is_joined is not True:
