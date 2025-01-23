@@ -77,8 +77,11 @@ class GPUDriverDetector:
         return [p for p in install_packages if p]
 
 
-def autoinstall() -> None:
+def autoinstall() -> list[str]:
     """Autodetect available GPUs and install drivers.
+
+    Returns:
+        The list of driver packages installed.
 
     Raises:
         GPUOpsError: Raised if error is encountered during package install.
@@ -89,13 +92,15 @@ def autoinstall() -> None:
 
     if len(install_packages) == 0:
         _logger.info("no GPU drivers requiring installation")
-        return
+        return install_packages
 
     _logger.info("installing GPU driver packages: %s", install_packages)
     try:
         apt.add_package(install_packages)
     except (apt.PackageNotFoundError, apt.PackageError) as e:
         raise GPUOpsError(f"failed to install packages {install_packages}. reason: {e}")
+
+    return install_packages
 
 
 def get_all_gpu() -> dict[str, list[int]]:
