@@ -93,8 +93,8 @@ class SlurmdCharm(CharmBase):
             rdma.install()
 
             self.unit.status = MaintenanceStatus("detecting if machine is GPU-equipped")
-            installed_packages = gpu.autoinstall()
-            if len(installed_packages) > 0:
+            gpu_enabled = gpu.autoinstall()
+            if gpu_enabled:
                 self.unit.status = MaintenanceStatus("successfully installed GPU drivers")
             else:
                 self.unit.status = MaintenanceStatus("no GPUs found. continuing")
