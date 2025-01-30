@@ -25,6 +25,8 @@ from ops.model import ActiveStatus, BlockedStatus
 from ops.testing import Harness
 from pyfakefs.fake_filesystem_unittest import TestCase
 
+from utils.rdma import _override_opmi_conf
+
 from charms.hpc_libs.v0.slurm_ops import SlurmOpsError
 
 
@@ -53,6 +55,7 @@ class TestCharm(TestCase):
         )
         defer.assert_not_called()
 
+    @patch("utils.rdma._override_opmi_conf")
     @patch("utils.nhc.install")
     @patch("utils.service.override_service")
     @patch("charms.operator_libs_linux.v0.juju_systemd_notices.SystemdNotices.subscribe")
@@ -73,7 +76,8 @@ class TestCharm(TestCase):
 
         self.harness.charm.on.install.emit()
 
-        apt_mock.assert_called_with([metapackage, linux_modules])
+        apt_mock.assert_any_call(["rdma-core", "infiniband-diags"])
+        apt_mock.assert_any_call([metapackage, linux_modules])
         self.assertTrue(self.harness.charm._stored.slurm_installed)
         defer.assert_not_called()
 
@@ -91,6 +95,25 @@ class TestCharm(TestCase):
         )
         self.assertFalse(self.harness.charm._stored.slurm_installed)
         defer.assert_called()
+
+    def test_override_opmi_conf(self) -> None:
+        """Test OpenMPI configuration file override."""
+        initial_contents = (
+            "# Comment\nmtl = ^ofi\nbtl = ^uct,openib,ofi\npml = ^ucx\nosc = ^ucx,pt2pt\n"
+            "# Another comment\nosc = ^ucx,pt2pt\npml = ^ucx\nbtl = ^uct,openib,ofi\nmtl = ^ofi\n"
+        )
+        expected_contents = (
+            "# Comment\nmtl = ^ofi\nbtl = ^openib,ofi\nosc = ^pt2pt\n"
+            "# Another comment\nosc = ^pt2pt\nbtl = ^openib,ofi\nmtl = ^ofi\n"
+        )
+        path = "/etc/openmpi/openmpi-mca-params.conf"
+        self.fs.create_file(path, contents=initial_contents)
+
+        _override_opmi_conf(path)
+
+        with open(path, "r") as f:
+            contents = f.read()
+        self.assertEqual(contents, expected_contents)
 
     def test_service_slurmd_start(self) -> None:
         """Test service_slurmd_started event handler."""
