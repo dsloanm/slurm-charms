@@ -83,21 +83,21 @@ class SlurmdCharm(CharmBase):
         # running kernel pending replacement by a newer version on reboot.
         self._reboot_if_required(now=True)
 
-        self.unit.status = MaintenanceStatus("installing slurmd")
+        self.unit.status = MaintenanceStatus("Installing slurmd")
 
         try:
             self._slurmd.install()
 
-            self.unit.status = MaintenanceStatus("installing nhc")
+            self.unit.status = MaintenanceStatus("Installing nhc")
             nhc.install()
             rdma.install()
 
-            self.unit.status = MaintenanceStatus("detecting if machine is GPU-equipped")
+            self.unit.status = MaintenanceStatus("Detecting if machine is GPU-equipped")
             gpu_enabled = gpu.autoinstall()
             if gpu_enabled:
-                self.unit.status = MaintenanceStatus("successfully installed GPU drivers")
+                self.unit.status = MaintenanceStatus("Successfully installed GPU drivers")
             else:
-                self.unit.status = MaintenanceStatus("no GPUs found. continuing")
+                self.unit.status = MaintenanceStatus("No GPUs found. Continuing")
 
             self.unit.set_workload_version(self._slurmd.version())
             # TODO: https://github.com/orgs/charmed-hpc/discussions/10 -
@@ -321,7 +321,7 @@ class SlurmdCharm(CharmBase):
         - munge key configured and working
         """
         if self._stored.slurm_installed is not True:
-            self.unit.status = BlockedStatus("install failed. see logs for further details")
+            self.unit.status = BlockedStatus("Install failed. See `juju debug-log` for details")
             return False
 
         if self._slurmctld.is_joined is not True:

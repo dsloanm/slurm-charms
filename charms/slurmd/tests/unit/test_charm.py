@@ -91,7 +91,7 @@ class TestCharm(TestCase):
 
         self.assertEqual(
             self.harness.charm.unit.status,
-            BlockedStatus("install failed. see logs for further details"),
+            BlockedStatus("Install failed. See `juju debug-log` for details"),
         )
         self.assertFalse(self.harness.charm._stored.slurm_installed)
         defer.assert_called()
@@ -185,5 +185,5 @@ class TestCharm(TestCase):
         self.harness.charm.on.update_status.emit()
         self.assertEqual(
             self.harness.charm.unit.status,
-            BlockedStatus("install failed. see logs for further details"),
+            BlockedStatus("Install failed. See `juju debug-log` for details"),
         )
