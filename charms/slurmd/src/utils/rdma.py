@@ -15,6 +15,7 @@
 """Manage RDMA packages on compute nodes."""
 
 import logging
+from pathlib import Path
 
 import charms.operator_libs_linux.v0.apt as apt
 
@@ -30,20 +31,17 @@ class RDMAOpsError(Exception):
         return self.args[0]
 
 
-def install() -> None:
-    """Install RDMA packages.
-
-    Raises:
-        RDMAOpsError: Raised if error is encountered during package install.
-    """
-    install_packages = ["rdma-core", "infiniband-diags"]
-
+def _install_rdma(install_packages: list) -> None:
+    """Install the given list of packages."""
     _logger.info("installing RDMA packages: %s", install_packages)
     try:
         apt.add_package(install_packages)
     except (apt.PackageNotFoundError, apt.PackageError) as e:
         raise RDMAOpsError(f"failed to install packages {install_packages}. reason: {e}")
 
+
+def _override_opmi_conf(conf: str) -> None:
+    """Override OpenMPI configuration."""
     # Re-enable UCX/UCT.
     # The OpenMPI package from archive includes a Debian patch that disables UCX to silence
     # warnings when running on systems without RDMA hardware. This leads to the less performant
@@ -54,33 +52,38 @@ def install() -> None:
     # https://sources.debian.org/src/openmpi/4.1.4-3/debian/patches/no-warning-unused.patch/#L24
     # https://github.com/open-mpi/ompi/issues/8367
     # https://github.com/open-mpi/ompi/blob/v4.1.x/README#L763
-    path = "/etc/openmpi/openmpi-mca-params.conf"
-    _logger.info("enabling OpenMPI UCX transport in %s", path)
+    _logger.info("enabling OpenMPI UCX transport in %s", conf)
 
-    try:
-        with open(path, "r") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        _logger.warn("%s not found. skipping OpenMPI UCX enablement", path)
+    file = Path(conf)
+    if not file.exists():
+        _logger.warn("%s not found. skipping OpenMPI UCX enablement", file)
         return
 
-    # Current patch adds lines:
-    #   btl = ^uct,openib,ofi
-    #   pml = ^ucx
-    #   osc = ^ucx,pt2pt
-    # Remove "uct" and "ucx". Values must still begin with "^", e.g. `btl = ^openib,ofi`, to leave
-    # openib and ofi disabled.
-    new_lines = []
-    for line in lines:
-        if line.startswith(("btl =", "pml =", "osc =")):
-            parts = line.split()
-            values = parts[2].strip().lstrip("^").split(",")
-            values = [v for v in values if v not in ("uct", "ucx")]
-            # Remove line entirely if all values removed, e.g. "pml = ^ucx"
-            if values:
-                new_lines.append(f"{parts[0]} = ^{','.join(values)}\n")
-        else:
-            new_lines.append(line)
+    content = file.read_text().splitlines()
+    for i, line in enumerate(content):
+        if not line.startswith(("btl =", "pml =", "osc =")):
+            continue
 
-    with open(path, "w") as f:
-        f.writelines(new_lines)
+        parts = line.split()
+        values = parts[2].strip().lstrip("^").split(",")
+        values = [v for v in values if v not in ("uct", "ucx")]
+        # Remove line entirely if all values removed, e.g. "pml = ^ucx"
+        if values:
+            content[i] = f"{parts[0]} = ^{','.join(values)}"
+        else:
+            content[i] = ""
+
+    file.write_text("\n".join(filter(None, content)) + "\n")
+
+
+def install() -> None:
+    """Install RDMA packages.
+
+    Raises:
+        RDMAOpsError: Raised if error is encountered during package install.
+    """
+    install_packages = ["rdma-core", "infiniband-diags"]
+    _install_rdma(install_packages)
+
+    conf = "/etc/openmpi/openmpi-mca-params.conf"
+    _override_opmi_conf(conf)
