@@ -41,7 +41,7 @@ def _install_rdma() -> None:
         raise RDMAOpsError(f"failed to install packages {install_packages}. reason: {e}")
 
 
-def _override_opmi_conf() -> None:
+def _override_ompi_conf() -> None:
     """Re-enable UCX/UCT transport protocol by overriding system OpenMPI configuration.
 
     Notes:
@@ -89,4 +89,4 @@ def install() -> None:
         RDMAOpsError: Raised if error is encountered during package install.
     """
     _install_rdma()
-    _override_opmi_conf()
+    _override_ompi_conf()
