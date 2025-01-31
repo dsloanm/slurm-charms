@@ -109,7 +109,7 @@ class TestCharm(TestCase):
         path = "/etc/openmpi/openmpi-mca-params.conf"
         self.fs.create_file(path, contents=initial_contents)
 
-        _override_opmi_conf(path)
+        _override_opmi_conf()
 
         with open(path, "r") as f:
             contents = f.read()

@@ -31,8 +31,9 @@ class RDMAOpsError(Exception):
         return self.args[0]
 
 
-def _install_rdma(install_packages: list) -> None:
+def _install_rdma() -> None:
     """Install the given list of packages."""
+    install_packages = ["rdma-core", "infiniband-diags"]
     _logger.info("installing RDMA packages: %s", install_packages)
     try:
         apt.add_package(install_packages)
@@ -40,18 +41,26 @@ def _install_rdma(install_packages: list) -> None:
         raise RDMAOpsError(f"failed to install packages {install_packages}. reason: {e}")
 
 
-def _override_opmi_conf(conf: str) -> None:
-    """Override OpenMPI configuration."""
-    # Re-enable UCX/UCT.
-    # The OpenMPI package from archive includes a Debian patch that disables UCX to silence
-    # warnings when running on systems without RDMA hardware. This leads to the less performant
-    # "ob1" method being selected on Infiniband-enabled systems. By default, OpenMPI selects UCX
-    # when Infiniband devices are available. This default functionality is restored here.
-    #
-    # See:
-    # https://sources.debian.org/src/openmpi/4.1.4-3/debian/patches/no-warning-unused.patch/#L24
-    # https://github.com/open-mpi/ompi/issues/8367
-    # https://github.com/open-mpi/ompi/blob/v4.1.x/README#L763
+def _override_opmi_conf() -> None:
+    """Re-enable UCX/UCT transport protocol by overriding system OpenMPI configuration.
+
+    Notes:
+        The OpenMPI package from archive includes a Debian patch that disables UCX to silence
+        warnings when running on systems without RDMA hardware. This leads to the less performant
+        "ob1" method being selected on Infiniband-enabled systems. By default, OpenMPI selects UCX
+        when Infiniband devices are available. This default functionality is restored here.
+
+        See:
+        * https://sources.debian.org/src/openmpi/4.1.4-3/debian/patches/no-warning-unused.patch/#L24
+        * https://github.com/open-mpi/ompi/issues/8367
+        * https://github.com/open-mpi/ompi/blob/v4.1.x/README#L763
+
+    Todo:
+        * This method may not be required in future. Recent versions of UCX do not seem to produce
+          the warning messages in question. A bug is open with Debian to consider re-enabling UCX:
+          https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1094805
+    """
+    conf = "/etc/openmpi/openmpi-mca-params.conf"
     _logger.info("enabling OpenMPI UCX transport in %s", conf)
 
     file = Path(conf)
@@ -68,10 +77,7 @@ def _override_opmi_conf(conf: str) -> None:
         values = parts[2].strip().lstrip("^").split(",")
         values = [v for v in values if v not in ("uct", "ucx")]
         # Remove line entirely if all values removed, e.g. "pml = ^ucx"
-        if values:
-            content[i] = f"{parts[0]} = ^{','.join(values)}"
-        else:
-            content[i] = ""
+        content[i] = f"{parts[0]} = ^{','.join(values)}" if values else ""
 
     file.write_text("\n".join(filter(None, content)) + "\n")
 
@@ -82,8 +88,5 @@ def install() -> None:
     Raises:
         RDMAOpsError: Raised if error is encountered during package install.
     """
-    install_packages = ["rdma-core", "infiniband-diags"]
-    _install_rdma(install_packages)
-
-    conf = "/etc/openmpi/openmpi-mca-params.conf"
-    _override_opmi_conf(conf)
+    _install_rdma()
+    _override_opmi_conf()
