@@ -90,6 +90,8 @@ class SlurmdCharm(CharmBase):
 
             self.unit.status = MaintenanceStatus("Installing nhc")
             nhc.install()
+
+            self.unit.status = MaintenanceStatus("Installing RDMA packages")
             rdma.install()
 
             self.unit.status = MaintenanceStatus("Detecting if machine is GPU-equipped")
