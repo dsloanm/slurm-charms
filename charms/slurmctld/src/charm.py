@@ -8,6 +8,7 @@ import logging
 import secrets
 import shlex
 import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
@@ -106,6 +107,7 @@ class SlurmctldCharm(CharmBase):
             self.on.show_current_config_action: self._on_show_current_config_action,
             self.on.drain_action: self._on_drain_nodes_action,
             self.on.resume_action: self._on_resume_nodes_action,
+            self.on.migrate_state_save_location_action: self._on_migrate_state_save_location_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
@@ -314,6 +316,40 @@ class SlurmctldCharm(CharmBase):
             event.set_results({"status": "resuming", "nodes": nodes})
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error resuming {nodes}: {e.output}")
+
+    def _on_migrate_state_save_location_action(self, event: ActionEvent) -> None:
+        """Migrate StateSaveLocation to specified directory."""
+        results = {}
+        dst = Path(event.params["new-location"])
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.chown(dst, user="slurm", group="slurm")
+
+        with self._slurmctld.config.edit() as config:
+            src = Path(config.state_save_location)
+            config.state_save_location = dst
+            results["state-save-location"] = config.state_save_location
+
+            # JWT key requires migration if it is also in the checkpoint directory
+            if key_val := config.auth_alt_parameters.get("jwt_key"):
+                key_path = Path(key_val)
+                if key_path.is_relative_to(src):
+                    relative = key_path.relative_to(src)
+                    config.auth_alt_parameters["jwt_key"] = dst / relative
+                    results["jwt-key"] = config.auth_alt_parameters["jwt_key"]
+
+        self._slurmctld.service.stop()
+
+        shutil.copytree(src, dst, copy_function=shutil.copy2, dirs_exist_ok=True)
+        # Ownership is not preserved with copy. Fix here.
+        for path in Path(dst).rglob("*"):
+            shutil.chown(path, user="slurm", group="slurm")
+
+        self._slurmctld.service.start()
+        # TODO determine best way to sync directories.
+        # Safer would be to copy first, stop service, sync delta, restart service.
+
+        shutil.rmtree(src)
+        event.set_results(results)
 
     def _on_slurmd_available(self, event: SlurmdAvailableEvent) -> None:
         """Triggers when a slurmd unit joins the relation."""
