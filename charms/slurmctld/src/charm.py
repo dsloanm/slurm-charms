@@ -116,36 +116,41 @@ class SlurmctldCharm(CharmBase):
         """Perform installation operations for slurmctld."""
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
-            if self.unit.is_leader():
-                self._slurmctld.install()
+            self._slurmctld.install()
 
+            if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._stored.jwt_rsa = self._slurmctld.jwt.get()
+                self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
 
                 self._slurmctld.munge.key.generate()
                 self._stored.munge_key = self._slurmctld.munge.key.get()
-
-                self._slurmctld.munge.service.restart()
-                self._slurmctld.service.enable()
-
-                self._slurmctld.exporter.args = [
-                    "-slurm.collect-diags",
-                    "-slurm.collect-limits",
-                ]
-                self._slurmctld.exporter.service.enable()
-                self._slurmctld.exporter.service.restart()
-
-                self.unit.set_workload_version(self._slurmctld.version())
-
-                self.slurm_installed = True
+                self._slurmctld_peer.auth_key = self._stored.munge_key
             else:
-                self.unit.status = BlockedStatus("slurmctld high-availability not supported")
-                logger.warning(
-                    "slurmctld high-availability is not supported yet. please scale down application."
-                )
-                event.defer()
+                try:
+                    self._stored.jwt_rsa = self._stored.munge_key
+                    self._stored.munge_key = self._slurmctld_peer.auth_key
+                except SlurmctldPeerError as e:
+                    self.unit.status = BlockedStatus(e.message)
+                    logger.warning(e.message)
+                    event.defer()
+                    return
+
+            self._slurmctld.munge.service.restart()
+            self._slurmctld.service.enable()
+
+            self._slurmctld.exporter.args = [
+                "-slurm.collect-diags",
+                "-slurm.collect-limits",
+            ]
+            self._slurmctld.exporter.service.enable()
+            self._slurmctld.exporter.service.restart()
+
+            self.unit.set_workload_version(self._slurmctld.version())
+
+            self.slurm_installed = True
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -182,11 +187,6 @@ class SlurmctldCharm(CharmBase):
 
             else:
                 logger.debug("Cluster name already created - skipping creation.")
-        else:
-            msg = "High availability of slurmctld is not supported at this time."
-            self.unit.status = BlockedStatus(msg)
-            logger.warning(msg)
-            event.defer()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
@@ -423,6 +423,7 @@ class SlurmctldCharm(CharmBase):
         gres_all_nodes = self._slurmd.get_all_gres_info()
         gres_conf = GRESConfig(Nodes=gres_all_nodes)
         self._slurmctld.gres.dump(gres_conf)
+        self._slurmctld_peer.gres_conf = str(gres_conf)
 
     def _assemble_acct_gather_config(self) -> Optional[AcctGatherConfig]:
         """Assemble and return the AcctGatherConfig."""
@@ -516,6 +517,8 @@ class SlurmctldCharm(CharmBase):
             # slurmrestd needs the slurm.conf file, so send it every time it changes.
             if self._slurmrestd.is_joined is not False and self._stored.slurmdbd_host != "":
                 self._slurmrestd.set_slurm_config_on_app_relation_data(str(slurm_config))
+
+            self._slurmctld_peer.slurm_conf = str(slurm_config)
         else:
             logger.debug("## Should write slurm.conf, but we don't have it. Deferring.")
             event.defer()
