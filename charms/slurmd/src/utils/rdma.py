@@ -65,7 +65,7 @@ def _override_ompi_conf() -> None:
 
     file = Path(conf)
     if not file.exists():
-        _logger.warn("%s not found. skipping OpenMPI UCX enablement", file)
+        _logger.warning("%s not found. skipping OpenMPI UCX enablement", file)
         return
 
     content = file.read_text().splitlines()
