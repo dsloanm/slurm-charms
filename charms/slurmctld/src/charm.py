@@ -7,6 +7,7 @@
 import logging
 import secrets
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -117,40 +118,29 @@ class SlurmctldCharm(CharmBase):
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
             self._slurmctld.install()
+            self._slurmctld.exporter.args = [
+                "-slurm.collect-diags",
+                "-slurm.collect-limits",
+            ]
 
             if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._stored.jwt_rsa = self._slurmctld.jwt.get()
-                self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
 
                 self._slurmctld.munge.key.generate()
                 self._stored.munge_key = self._slurmctld.munge.key.get()
-                self._slurmctld_peer.auth_key = self._stored.munge_key
-            else:
-                try:
-                    self._stored.jwt_rsa = self._stored.munge_key
-                    self._stored.munge_key = self._slurmctld_peer.auth_key
-                except SlurmctldPeerError as e:
-                    self.unit.status = BlockedStatus(e.message)
-                    logger.warning(e.message)
-                    event.defer()
-                    return
 
-            self._slurmctld.munge.service.restart()
-            self._slurmctld.service.enable()
+                self._slurmctld.munge.service.restart()
+                self._slurmctld.service.enable()
 
-            self._slurmctld.exporter.args = [
-                "-slurm.collect-diags",
-                "-slurm.collect-limits",
-            ]
-            self._slurmctld.exporter.service.enable()
-            self._slurmctld.exporter.service.restart()
+                self._slurmctld.exporter.service.enable()
+                self._slurmctld.exporter.service.restart()
 
             self.unit.set_workload_version(self._slurmctld.version())
-
             self.slurm_installed = True
+
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -187,6 +177,45 @@ class SlurmctldCharm(CharmBase):
 
             else:
                 logger.debug("Cluster name already created - skipping creation.")
+
+            try:
+                if self._slurmctld_peer.jwt_key is None:
+                    self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
+                if self._slurmctld_peer.auth_key is None:
+                    self._slurmctld_peer.auth_key = self._stored.munge_key
+            except SlurmctldPeerError as e:
+                self.unit.status = BlockedStatus(e.message)
+                logger.error(e.message)
+                event.defer()
+                return
+        else:
+            try:
+                # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
+                #  Use Juju Secrets instead of StoredState for exchanging keys between units.
+                try:
+                    self._slurmctld.config.dump(self._slurmctld_peer.slurm_conf)
+
+                    self._stored.jwt_rsa = self._slurmctld_peer.jwt_key
+                    self._slurmctld.jwt.set(self._stored.jwt_rsa)
+
+                    self._stored.munge_key = self._slurmctld_peer.auth_key
+                    self._slurmctld.munge.key.set(self._stored.munge_key)
+                except SlurmctldPeerError as e:
+                    self.unit.status = BlockedStatus(e.message)
+                    logger.warning(e.message)
+                    event.defer()
+                    return
+
+                self._slurmctld.munge.service.restart()
+
+                self._slurmctld.service.enable()
+                self._slurmctld.service.restart()
+
+                self._slurmctld.exporter.service.enable()
+                self._slurmctld.exporter.service.restart()
+            except SlurmOpsError as e:
+                logger.error(e.message)
+                event.defer()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
@@ -319,6 +348,10 @@ class SlurmctldCharm(CharmBase):
 
     def _on_migrate_state_save_location_action(self, event: ActionEvent) -> None:
         """Migrate StateSaveLocation to specified directory."""
+        if not self.unit.is_leader():
+            event.fail(message="error: action must be run on leader unit")
+            return
+
         results = {}
         dst = Path(event.params["new-location"])
         dst.mkdir(parents=True, exist_ok=True)
@@ -336,6 +369,9 @@ class SlurmctldCharm(CharmBase):
                     relative = key_path.relative_to(src)
                     config.auth_alt_parameters["jwt_key"] = dst / relative
                     results["jwt-key"] = config.auth_alt_parameters["jwt_key"]
+
+            # Update slurm.conf data for backup slurmctld units
+            self._slurmctld_peer.slurm_conf = str(config)
 
         self._slurmctld.service.stop()
 
