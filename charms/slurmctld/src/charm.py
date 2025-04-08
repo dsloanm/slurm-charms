@@ -127,16 +127,7 @@ class SlurmctldCharm(CharmBase):
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
-                self._stored.jwt_rsa = self._slurmctld.jwt.get()
-
                 self._slurmctld.munge.key.generate()
-                self._stored.munge_key = self._slurmctld.munge.key.get()
-
-                self._slurmctld.munge.service.restart()
-                self._slurmctld.service.enable()
-
-                self._slurmctld.exporter.service.enable()
-                self._slurmctld.exporter.service.restart()
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -157,6 +148,18 @@ class SlurmctldCharm(CharmBase):
               event executions.
         """
         if self.unit.is_leader():
+            try:
+                if self._slurmctld_peer.jwt_key is None:
+                    self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
+                if self._slurmctld_peer.auth_key is None:
+                    self._slurmctld_peer.auth_key = self._stored.munge_key
+                self._slurmctld_peer.add_hostname(self._slurmctld.hostname)
+            except SlurmctldPeerError as e:
+                self.unit.status = BlockedStatus(e.message)
+                logger.error(e.message)
+                event.defer()
+                return
+
             if self._slurmctld_peer.cluster_name is None:
                 if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))) != "":
                     cluster_name = charm_config_cluster_name
@@ -173,49 +176,38 @@ class SlurmctldCharm(CharmBase):
                     event.defer()
                     return
 
-                self._on_write_slurm_conf(event)
-
-            else:
-                logger.debug("Cluster name already created - skipping creation.")
-
-            try:
-                if self._slurmctld_peer.jwt_key is None:
-                    self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
-                if self._slurmctld_peer.auth_key is None:
-                    self._slurmctld_peer.auth_key = self._stored.munge_key
-            except SlurmctldPeerError as e:
-                self.unit.status = BlockedStatus(e.message)
-                logger.error(e.message)
-                event.defer()
-                return
+            self._on_write_slurm_conf(event)
         else:
-            try:
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 try:
                     self._slurmctld.config.dump(self._slurmctld_peer.slurm_conf)
+                    if self._slurmctld_peer.gres_conf:
+                        self._slurmctld.gres.dump(self._slurmctld_peer.gres_conf)
 
                     self._stored.jwt_rsa = self._slurmctld_peer.jwt_key
                     self._slurmctld.jwt.set(self._stored.jwt_rsa)
 
                     self._stored.munge_key = self._slurmctld_peer.auth_key
                     self._slurmctld.munge.key.set(self._stored.munge_key)
+                    self._slurmctld_peer.add_hostname(self._slurmctld.hostname)
                 except SlurmctldPeerError as e:
                     self.unit.status = BlockedStatus(e.message)
                     logger.warning(e.message)
                     event.defer()
                     return
 
-                self._slurmctld.munge.service.restart()
+        try:
+            self._slurmctld.munge.service.restart()
 
-                self._slurmctld.service.enable()
-                self._slurmctld.service.restart()
+            self._slurmctld.service.enable()
+            self._slurmctld.service.restart()
 
-                self._slurmctld.exporter.service.enable()
-                self._slurmctld.exporter.service.restart()
-            except SlurmOpsError as e:
-                logger.error(e.message)
-                event.defer()
+            self._slurmctld.exporter.service.enable()
+            self._slurmctld.exporter.service.restart()
+        except SlurmOpsError as e:
+            logger.error(e.message)
+            event.defer()
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
@@ -609,7 +601,7 @@ class SlurmctldCharm(CharmBase):
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
             SlurmctldAddr=self._ingress_address,
-            SlurmctldHost=[self._slurmctld.hostname],
+            SlurmctldHost=self._slurmctld_peer.hostnames,
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
@@ -685,11 +677,11 @@ class SlurmctldCharm(CharmBase):
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
-        return str(self._stored.munge_key)
+        return str(self._slurmctld.munge.key.get())
 
     def get_jwt_rsa(self) -> Optional[str]:
         """Get the stored jwt_rsa key."""
-        return str(self._stored.jwt_rsa)
+        return str(self._slurmctld.jwt.get())
 
     def _resume_nodes(self, nodelist: List[str]) -> None:
         """Run scontrol to resume the specified node list."""

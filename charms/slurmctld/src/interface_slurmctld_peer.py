@@ -63,6 +63,26 @@ class SlurmctldPeer(Object):
         self._relation.data[self.model.app][property_name] = property_value
 
     @property
+    def hostnames(self) -> Optional[str]:
+        """Return the hostnames of all units in this relation."""
+        return self._property_get("hostnames").split(",") if self._property_get("hostnames") else None
+
+    def add_hostname(self, hostname: str) -> None:
+        """Adds hostname to app relation data."""
+        if not self._relation:
+            raise SlurmctldPeerError(
+                f"`slurmctld-peer` relation not available yet, cannot add hostname."
+            )
+
+        # TODO: ensure hostname is unique
+        hostnames = self._property_get("hostnames")
+        self._relation.data[self.model.app]["hostnames"] = (
+            f"{hostnames},{hostname}" if hostnames else hostname
+        )
+
+    # TODO: remove_hostname()
+
+    @property
     def cluster_name(self) -> Optional[str]:
         """Return the cluster_name from app relation data."""
         return self._property_get("cluster_name")
