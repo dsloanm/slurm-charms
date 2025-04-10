@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Union
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
-    CLUSTER_NAME_PREFIX,
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
@@ -66,9 +65,11 @@ class SlurmctldCharm(CharmBase):
         self._stored.set_default(
             default_partition=str(),
             jwt_key=str(),
+            jwt_key_path=str(),
             munge_key=str(),
             new_nodes=[],
             nhc_params=str(),
+            save_state_location=str(),
             slurm_installed=False,
             slurmdbd_host=str(),
             user_supplied_slurm_conf_params=str(),
@@ -131,7 +132,6 @@ class SlurmctldCharm(CharmBase):
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
-
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -147,61 +147,13 @@ class SlurmctldCharm(CharmBase):
               first execution of this hook, we log and return on any subsequent start hook
               event executions.
         """
-        if self.unit.is_leader():
-            try:
-                if self._slurmctld_peer.jwt_key is None:
-                    self._slurmctld_peer.jwt_key = self._stored.jwt_rsa
-                if self._slurmctld_peer.auth_key is None:
-                    self._slurmctld_peer.auth_key = self._stored.munge_key
-                self._slurmctld_peer.add_hostname(self._slurmctld.hostname)
-            except SlurmctldPeerError as e:
-                self.unit.status = BlockedStatus(e.message)
-                logger.error(e.message)
-                event.defer()
-                return
-
-            if self._slurmctld_peer.cluster_name is None:
-                if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))) != "":
-                    cluster_name = charm_config_cluster_name
-                else:
-                    cluster_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
-
-                logger.debug(f"Cluster Name: {cluster_name}")
-
-                try:
-                    self._slurmctld_peer.cluster_name = cluster_name
-                except SlurmctldPeerError as e:
-                    self.unit.status = BlockedStatus(e.message)
-                    logger.error(e.message)
-                    event.defer()
-                    return
-
-            self._on_write_slurm_conf(event)
-        else:
-                # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
-                #  Use Juju Secrets instead of StoredState for exchanging keys between units.
-                try:
-                    self._slurmctld.config.dump(self._slurmctld_peer.slurm_conf)
-                    if self._slurmctld_peer.gres_conf:
-                        self._slurmctld.gres.dump(self._slurmctld_peer.gres_conf)
-
-                    self._stored.jwt_rsa = self._slurmctld_peer.jwt_key
-                    self._slurmctld.jwt.set(self._stored.jwt_rsa)
-
-                    self._stored.munge_key = self._slurmctld_peer.auth_key
-                    self._slurmctld.munge.key.set(self._stored.munge_key)
-                    self._slurmctld_peer.add_hostname(self._slurmctld.hostname)
-                except SlurmctldPeerError as e:
-                    self.unit.status = BlockedStatus(e.message)
-                    logger.warning(e.message)
-                    event.defer()
-                    return
-
         try:
             self._slurmctld.munge.service.restart()
 
             self._slurmctld.service.enable()
-            self._slurmctld.service.restart()
+            # Leader's slurmctld service is started in this function.
+            # Peers do not start slurmctld until their relation_changed event.
+            self._on_write_slurm_conf(event)
 
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
@@ -352,6 +304,7 @@ class SlurmctldCharm(CharmBase):
         with self._slurmctld.config.edit() as config:
             src = Path(config.state_save_location)
             config.state_save_location = dst
+            self._stored.save_state_location = str(dst)
             results["state-save-location"] = config.state_save_location
 
             # JWT key requires migration if it is also in the checkpoint directory
@@ -360,6 +313,7 @@ class SlurmctldCharm(CharmBase):
                 if key_path.is_relative_to(src):
                     relative = key_path.relative_to(src)
                     config.auth_alt_parameters["jwt_key"] = dst / relative
+                    self._stored.jwt_key_path = str(dst / relative)
                     results["jwt-key"] = config.auth_alt_parameters["jwt_key"]
 
             # Update slurm.conf data for backup slurmctld units
@@ -391,6 +345,9 @@ class SlurmctldCharm(CharmBase):
             Lack of map between departing unit and NodeName complicates removal of node from gres.conf.
             Instead, rewrite full gres.conf with data from remaining units.
         """
+        if not self.unit.is_leader():
+            return
+
         # Reconcile the new_nodes.
         new_nodes = self.new_nodes
         logger.debug(f"New nodes from stored state: {new_nodes}")
@@ -489,7 +446,7 @@ class SlurmctldCharm(CharmBase):
         if not self.unit.is_leader():
             return
 
-        # If slurmctld isn't installed and we don't have a cluster_name, defer.
+        # If not ready, defer.
         if not self._check_status():
             event.defer()
             return
@@ -598,9 +555,15 @@ class SlurmctldCharm(CharmBase):
             profiling_parameters = self._assemble_profiling_params()
             logger.debug(f"## profiling_params: {profiling_parameters}")
 
+        # FIXME: this is overwriting constants
+        if self._stored.save_state_location:
+            CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"] = self._stored.save_state_location
+        if self._stored.jwt_key_path:
+            CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["AuthAltParameters"] = {"jwt_key": self._stored.jwt_key_path}
+
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            SlurmctldAddr=self._ingress_address,
+            #SlurmctldAddr=self._ingress_address,
             SlurmctldHost=self._slurmctld_peer.hostnames,
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
@@ -660,10 +623,6 @@ class SlurmctldCharm(CharmBase):
             self.unit.status = BlockedStatus(
                 "failed to install slurmctld. see logs for further details"
             )
-            return False
-
-        if self.cluster_name is None:
-            self.unit.status = WaitingStatus("Waiting for cluster_name....")
             return False
 
         # TODO: https://github.com/charmed-hpc/hpc-libs/issues/18 -

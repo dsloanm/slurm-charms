@@ -92,6 +92,9 @@ class Slurmd(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         """Set our data on the relation."""
+        if not self.framework.model.unit.is_leader():
+            return
+
         # Need to wait until the charm has installed slurm before we can proceed.
         if not self._charm.slurm_installed:
             event.defer()
@@ -112,6 +115,9 @@ class Slurmd(Object):
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         """Emit slurmd available event and conditionally update new_nodes."""
+        if not self.framework.model.unit.is_leader():
+            return
+
         if app := event.app:
             app_data = event.relation.data[app]
             if not app_data.get("partition"):
