@@ -40,3 +40,24 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "SlurmdUser": "root",
     "RebootProgram": "/usr/sbin/reboot --reboot",
 }
+
+CHECKPOINT_SYNC_SERVICE = """[Unit]
+Description=Slurm checkpoint directory sync
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rsync --delete -a /var/lib/slurm/checkpoint-primary/ /var/lib/slurm/checkpoint/
+User=slurm
+Group=slurm
+"""
+
+CHECKPOINT_SYNC_TIMER = """[Unit]
+Description=Run Slurm checkpoint directory sync periodically
+
+[Timer]
+OnBootSec=1sec
+OnUnitActiveSec=5sec
+
+[Install]
+WantedBy=timers.target
+"""

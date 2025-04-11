@@ -6,10 +6,14 @@
 import json
 import logging
 import secrets
+import subprocess
 from pathlib import Path
 from typing import Optional
 
-from constants import CLUSTER_NAME_PREFIX
+from constants import (
+    CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    CLUSTER_NAME_PREFIX
+)
 from ops import (
     Object,
     RelationChangedEvent,
@@ -17,6 +21,8 @@ from ops import (
     RelationJoinedEvent,
 )
 from slurmutils.models import SlurmConfig
+
+import charms.operator_libs_linux.v1.systemd as systemd
 
 logger = logging.getLogger()
 
@@ -72,7 +78,7 @@ class SlurmctldPeer(Object):
         )
 
     def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
-        # TODO: confirm if the following checks are needed. Does only the leader see this event? Is the joining unit's relation-created event guaranteed to complete before this event triggers?
+        # TODO: should this be a primary check rather than leader? Issue is cannot call get_instances() until every unit has a slurm.conf
         if not self._charm.unit.is_leader():
             return
 
@@ -83,8 +89,11 @@ class SlurmctldPeer(Object):
 
         # TODO: consider moving this to main charm
         self._charm._on_write_slurm_conf(event)
+        # TODO: update NFS share allowed hosts here too
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
+        # TODO: should this be a primary check rather than leader? Issue is cannot call get_instances() until every unit has a slurm.conf
+        # TODO: If the primary isn't the leader, we need to write out config files but not mount/sync the checkpoint directory...
         if self._charm.unit.is_leader():
             return
 
@@ -93,11 +102,6 @@ class SlurmctldPeer(Object):
 
         if self._charm.hostname not in slurm_conf.slurmctld_host:
             logger.debug("leader yet to add this backup host to slurm config. deferring event")
-            event.defer()
-            return
-
-        if not Path(slurm_conf.state_save_location).exists():
-            logger.debug("shared state directory %s yet to exist. deferring event", slurm_conf.state_save_location)
             event.defer()
             return
 
@@ -113,6 +117,23 @@ class SlurmctldPeer(Object):
             self._charm._stored.save_state_location = str(config.state_save_location)
             self._charm._stored.jwt_key_path = str(config.auth_alt_parameters["jwt_key"])
 
+        # TODO: emit and event here and move this to main charm?
+        # All backups mount the primary's state save location then periodically sync with their own state save location
+        primary, _ = self._charm.get_instances()
+        save_state_location = CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]
+        mount_point_primary = Path(f"{save_state_location}-primary")
+        mount_point_primary.mkdir(parents=True, exist_ok=True)
+
+        # FIXME: this only works until the charm reboots. Add to fstab or use autofs.
+        try:
+            subprocess.check_output(["mount", "-o", "soft", f"{primary}:{save_state_location}", mount_point_primary])
+        except subprocess.CalledProcessError:
+            logger.exception("mount of %s:%s to %s failed", primary, save_state_location, mount_point_primary)
+            # TODO raise an exception
+            return
+
+        systemd.service_enable("checkpoint-sync.timer")
+        systemd.service_start("checkpoint-sync.timer")
         self._charm._slurmctld.munge.service.restart()
         self._charm._slurmctld.service.restart()
 

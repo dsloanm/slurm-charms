@@ -4,6 +4,7 @@
 
 """SlurmctldCharm."""
 
+import json
 import logging
 import secrets
 import shlex
@@ -15,6 +16,8 @@ from typing import Any, Dict, List, Optional, Union
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    CHECKPOINT_SYNC_SERVICE,
+    CHECKPOINT_SYNC_TIMER,
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
@@ -49,6 +52,8 @@ from ops import (
 from slurmutils.models import AcctGatherConfig, CgroupConfig, GRESConfig, GRESNode, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
+import charms.operator_libs_linux.v0.apt as apt
+import charms.operator_libs_linux.v1.systemd as systemd
 
 logger = logging.getLogger()
 
@@ -129,6 +134,9 @@ class SlurmctldCharm(CharmBase):
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._slurmctld.munge.key.generate()
+
+            self._setup_state_save_location_nfs_share()
+            self._setup_state_save_location_sync()
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -633,6 +641,55 @@ class SlurmctldCharm(CharmBase):
 
         self.unit.status = ActiveStatus("")
         return True
+
+    def _failover(self) -> None:
+        """Promote this backup controller to the new primary."""
+        # Set new primary hostname in peer relation.
+        # Then everyone needs to (in the relation-changed hook):
+        #   - Stop rsync
+        #   - Unmount old checkpoints-primary
+        # Backups only (not new primary) need to:
+        #   - Mount new checkpoints-primary
+        #   - Restart rsync
+
+    def _setup_state_save_location_nfs_share(self) -> None:
+        try:
+            apt.add_package("nfs-kernel-server")
+        except (apt.PackageNotFoundError, apt.PackageError) as e:
+            raise SlurmOpsError(f"failed to install nfs-kernel-server package. reason: {e}")
+
+        with open("/etc/exports", "a") as exports_file:
+            # TODO: Limit share to slurmctld instance hostnames
+            export_line = f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]} (ro)\n"
+            exports_file.write(export_line)
+
+        try:
+            subprocess.check_output(["exportfs", "-a", "-r"])
+        except subprocess.CalledProcessError as e:
+            raise SlurmOpsError(f"failed to NFS export checkpoint directory, reason: {e}")
+
+    def _setup_state_save_location_sync(self) -> None:
+        # Don't start these services here. Only the backups need to have them running.
+        Path("/etc/systemd/system/checkpoint-sync.service").write_text(CHECKPOINT_SYNC_SERVICE)
+        Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
+        systemd.daemon_reload()
+
+    def get_instances(self):
+        # TODO: add caching+timeout and flush:bool argument to avoid repeated scontrol calls?
+        # Example ping output:
+        # {'pings': [{'hostname': 'juju-829e74-84', 'pinged': 'DOWN', 'latency': 1850, 'mode': 'primary'}, {'hostname': 'juju-829e74-85', 'pinged': 'DOWN', 'latency': 1278, 'mode': 'backup1'}, {'hostname': 'juju-829e74-86', 'pinged': 'DOWN', 'latency': 984, 'mode': 'backup2'}], 'meta': {'plugin': {'type': '', 'name': '', 'data_parser': 'data_parser/v0.0.40', 'accounting_storage': ''}, 'client': {'source': '/dev/pts/0', 'user': 'ubuntu', 'group': 'ubuntu'}, 'command': [], 'slurm': {'version': {'major': '23', 'micro': '4', 'minor': '11'}, 'release': '23.11.4', 'cluster': 'charmed-hpc-pbge'}}, 'errors': [], 'warnings': []}
+        primary = ""
+        backups = []
+        ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
+        logger.debug("scontrol ping output: %s", ping_output)
+
+        for host in ping_output["pings"]:
+            if host["mode"] == "primary":
+                primary = host["hostname"]
+            else:
+                backups.append(host["hostname"])
+
+        return primary, backups
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
