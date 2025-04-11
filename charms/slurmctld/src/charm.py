@@ -129,14 +129,17 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-limits",
             ]
 
+            try:
+                apt.add_package("nfs-kernel-server")
+            except (apt.PackageNotFoundError, apt.PackageError) as e:
+                raise SlurmOpsError(f"failed to install nfs-kernel-server package. reason: {e}")
+            self._setup_state_save_location_sync()
+
             if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._slurmctld.munge.key.generate()
-
-            self._setup_state_save_location_nfs_share()
-            self._setup_state_save_location_sync()
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -642,26 +645,12 @@ class SlurmctldCharm(CharmBase):
         self.unit.status = ActiveStatus("")
         return True
 
-    def _failover(self) -> None:
-        """Promote this backup controller to the new primary."""
-        # Set new primary hostname in peer relation.
-        # Then everyone needs to (in the relation-changed hook):
-        #   - Stop rsync
-        #   - Unmount old checkpoints-primary
-        # Backups only (not new primary) need to:
-        #   - Mount new checkpoints-primary
-        #   - Restart rsync
-
-    def _setup_state_save_location_nfs_share(self) -> None:
-        try:
-            apt.add_package("nfs-kernel-server")
-        except (apt.PackageNotFoundError, apt.PackageError) as e:
-            raise SlurmOpsError(f"failed to install nfs-kernel-server package. reason: {e}")
-
-        with open("/etc/exports", "a") as exports_file:
-            # TODO: Limit share to slurmctld instance hostnames
-            export_line = f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]} (ro)\n"
-            exports_file.write(export_line)
+    def _export_state_save_location(self, hostname) -> None:
+        """Export the Slurm StateSaveLocation to the given hostname."""
+        # TODO: write an unexport function for departing units that deletes their file from /etc/exports.d and does "exportfs -a -u"
+        export = Path(f"/etc/exports.d/{hostname}-checkpoint.exports")
+        export.parent.mkdir(parents=True, exist_ok=True)
+        export.write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]} {hostname}(ro,no_subtree_check)\n")
 
         try:
             subprocess.check_output(["exportfs", "-a", "-r"])
@@ -673,6 +662,23 @@ class SlurmctldCharm(CharmBase):
         Path("/etc/systemd/system/checkpoint-sync.service").write_text(CHECKPOINT_SYNC_SERVICE)
         Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
         systemd.daemon_reload()
+
+    def _failover(self) -> None:
+        """Promote this backup controller to the new primary."""
+        # Everyone needs to:
+        #   - Stop rsync
+        #   - Unmount old checkpoints-primary
+        # Backups only (not new primary) need to:
+        #   - Mount new checkpoints-primary
+        #   - Restart rsync
+        # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
+        systemd.stop("checkpoint-sync.timer")
+        try:
+            # TODO: Is --lazy needed? What if this hangs?
+            subprocess.check_output(["umount", "--force", CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]])
+        except subprocess.CalledProcessError as e:
+            raise SlurmOpsError(f"failed to unmount primary checkpoint directory, reason: {e}")
+
 
     def get_instances(self):
         # TODO: add caching+timeout and flush:bool argument to avoid repeated scontrol calls?

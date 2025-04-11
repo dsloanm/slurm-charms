@@ -78,18 +78,14 @@ class SlurmctldPeer(Object):
         )
 
     def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
-        # TODO: should this be a primary check rather than leader? Issue is cannot call get_instances() until every unit has a slurm.conf
-        if not self._charm.unit.is_leader():
-            return
-
         if "hostname" not in self._relation.data[event.unit]:
             logger.debug("joining unit %s yet to add its hostname to databag: %s. deferring event", event.unit, self._relation.data[event.unit])
             event.defer()
             return
 
         # TODO: consider moving this to main charm
+        self._charm._export_state_save_location(self._relation.data[event.unit]["hostname"])
         self._charm._on_write_slurm_conf(event)
-        # TODO: update NFS share allowed hosts here too
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         # TODO: should this be a primary check rather than leader? Issue is cannot call get_instances() until every unit has a slurm.conf
