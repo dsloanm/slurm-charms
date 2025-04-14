@@ -41,6 +41,8 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "RebootProgram": "/usr/sbin/reboot --reboot",
 }
 
+CHECKPOINT_AUTOFS_MASTER = "/- /etc/auto.checkpoint --timeout 10"
+
 CHECKPOINT_SYNC_SERVICE = """[Unit]
 Description=Slurm checkpoint directory sync
 

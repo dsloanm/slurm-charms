@@ -6,15 +6,16 @@
 import json
 import logging
 import secrets
-import subprocess
 from pathlib import Path
 from typing import Optional
 
 from constants import (
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    CHECKPOINT_AUTOFS_MASTER,
     CLUSTER_NAME_PREFIX
 )
 from ops import (
+    EventBase,
     Object,
     RelationChangedEvent,
     RelationCreatedEvent,
@@ -25,6 +26,10 @@ from slurmutils.models import SlurmConfig
 import charms.operator_libs_linux.v1.systemd as systemd
 
 logger = logging.getLogger()
+
+
+class PartitionAvailableEvent(EventBase):
+    """Emitted when slurmd application partition data is available on the relation."""
 
 
 class SlurmctldPeerError(Exception):
@@ -73,6 +78,7 @@ class SlurmctldPeer(Object):
             {
                 "auth_key": self._charm.get_munge_key(),
                 "cluster_name": f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}",
+                "controllers": self._charm.hostname,
                 "jwt_key": self._charm.get_jwt_rsa(),
             }
         )
@@ -83,55 +89,60 @@ class SlurmctldPeer(Object):
             event.defer()
             return
 
-        # TODO: consider moving this to main charm
         self._charm._export_state_save_location(self._relation.data[event.unit]["hostname"])
-        self._charm._on_write_slurm_conf(event)
+
+        # TODO: consider moving everything below this to main charm
+        if self._charm.unit.is_leader():
+            # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
+            # Appending here ensures this unit will be the last backup.
+            self.add_controller(self._relation.data[event.unit]["hostname"])
+            self._charm._on_write_slurm_conf(event)
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-        # TODO: should this be a primary check rather than leader? Issue is cannot call get_instances() until every unit has a slurm.conf
+        # TODO: Clean up this logic - this happening before _on_relation_joined is breaking things
         # TODO: If the primary isn't the leader, we need to write out config files but not mount/sync the checkpoint directory...
-        if self._charm.unit.is_leader():
+        if not self._charm.unit.is_leader():
+            slurmctld_info = json.loads(self._relation.data[self.model.app]["slurmctld_info"])
+            slurm_conf = SlurmConfig.from_str(slurmctld_info["slurm_conf"])
+
+            if self._charm.hostname not in slurm_conf.slurmctld_host:
+                logger.debug("leader yet to add this backup host to slurm config. deferring event")
+                event.defer()
+                return
+
+            # TODO: emit an event here and let main charm handle this for better separation of concerns
+            self._charm._slurmctld.config.dump(slurmctld_info["slurm_conf"])
+            if "gres_conf" in slurmctld_info:
+                self._slurmctld.gres.dump(slurmctld_info["gres_conf"])
+            self._charm._slurmctld.munge.key.set(slurmctld_info["auth_key"])
+            self._charm._slurmctld.jwt.set(slurmctld_info["jwt_key"])
+
+            # Required so subsequent slurm.conf write from this unit (possible if it has taken over) do not use default paths
+            with self._charm._slurmctld.config.edit() as config:
+                self._charm._stored.save_state_location = str(config.state_save_location)
+                self._charm._stored.jwt_key_path = str(config.auth_alt_parameters["jwt_key"])
+
+            self._charm._slurmctld.munge.service.restart()
+            self._charm._slurmctld.service.restart()
+
+        # TODO: emit an event here and move everything below this to main charm?
+        active = self._charm.get_activate_instance()
+        if active == self._charm.hostname:
             return
 
-        slurmctld_info = json.loads(self._relation.data[self.model.app]["slurmctld_info"])
-        slurm_conf = SlurmConfig.from_str(slurmctld_info["slurm_conf"])
+        # All backups mount the active instances's state save location then periodically sync with their own state save location
+        mount_point_active = Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active")
+        mount_point_active.mkdir(parents=True, exist_ok=True)
+        Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
+        Path("/etc/auto.checkpoint").write_text(f"{mount_point_active} -ro {active}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
 
-        if self._charm.hostname not in slurm_conf.slurmctld_host:
-            logger.debug("leader yet to add this backup host to slurm config. deferring event")
-            event.defer()
-            return
-
-        # TODO: emit an event here and let main charm handle this for better separation of concerns
-        self._charm._slurmctld.config.dump(slurmctld_info["slurm_conf"])
-        if "gres_conf" in slurmctld_info:
-            self._slurmctld.gres.dump(slurmctld_info["gres_conf"])
-        self._charm._slurmctld.munge.key.set(slurmctld_info["auth_key"])
-        self._charm._slurmctld.jwt.set(slurmctld_info["jwt_key"])
-
-        # Required so subsequent slurm.conf write from this unit (possible if it has taken over as primary) do not use default paths
-        with self._charm._slurmctld.config.edit() as config:
-            self._charm._stored.save_state_location = str(config.state_save_location)
-            self._charm._stored.jwt_key_path = str(config.auth_alt_parameters["jwt_key"])
-
-        # TODO: emit and event here and move this to main charm?
-        # All backups mount the primary's state save location then periodically sync with their own state save location
-        primary, _ = self._charm.get_instances()
-        save_state_location = CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]
-        mount_point_primary = Path(f"{save_state_location}-primary")
-        mount_point_primary.mkdir(parents=True, exist_ok=True)
-
-        # FIXME: this only works until the charm reboots. Add to fstab or use autofs.
         try:
-            subprocess.check_output(["mount", "-o", "soft", f"{primary}:{save_state_location}", mount_point_primary])
-        except subprocess.CalledProcessError:
-            logger.exception("mount of %s:%s to %s failed", primary, save_state_location, mount_point_primary)
-            # TODO raise an exception
-            return
-
-        systemd.service_enable("checkpoint-sync.timer")
-        systemd.service_start("checkpoint-sync.timer")
-        self._charm._slurmctld.munge.service.restart()
-        self._charm._slurmctld.service.restart()
+            systemd.service_reload("autofs", restart_on_failure=True)
+            systemd.service_enable("checkpoint-sync.timer")
+            systemd.service_start("checkpoint-sync.timer")
+        except systemd.SystemdError:
+            logger.exception("failed to set up checkpoint synchronization")
+            # TODO: raise exception
 
     def _property_get(self, property_name) -> Optional[str]:
         """Return the property from app relation data."""
@@ -146,18 +157,21 @@ class SlurmctldPeer(Object):
         logger.debug("peer relation data slurmctld_info set to %s", slurmctld_info)
 
     @property
-    def hostnames(self):
-        return [self._charm.hostname] + [self._relation.data[unit]["hostname"] for unit in self._relation.units]
+    def controllers(self) -> Optional[str]:
+        """Return the controllers from app relation data."""
+        return self._property_get("controllers")
 
-    @property
-    def cluster_name(self) -> Optional[str]:
-        """Return the cluster_name from app relation data."""
-        return self._property_get("cluster_name")
+    def add_controller(self, hostname: str) -> None:
+        """Append the given hostname to the list of controllers."""
+        controllers = self._property_get("controllers")
+        controllers += f",{hostname}"
+        self._property_set("controllers", controllers)
 
-    @cluster_name.setter
-    def cluster_name(self, name: str) -> None:
-        """Set the cluster_name on app relation data."""
-        self._property_set("cluster_name", name)
+    def remove_controller(self, hostname: str) -> None:
+        """Remove the given hostname to the list of controllers."""
+        controllers = self._property_get("controllers").split(",")
+        controllers.remove(hostname)
+        self._property_set("controllers", controllers)
 
     @property
     def auth_key(self) -> Optional[str]:
@@ -168,6 +182,16 @@ class SlurmctldPeer(Object):
     def auth_key(self, value: str) -> None:
         """Set the auth_key on app relation data."""
         self._property_set("auth_key", value)
+
+    @property
+    def cluster_name(self) -> Optional[str]:
+        """Return the cluster_name from app relation data."""
+        return self._property_get("cluster_name")
+
+    @cluster_name.setter
+    def cluster_name(self, value: str) -> None:
+        """Set the cluster_name on app relation data."""
+        self._property_set("cluster_name", value)
 
     @property
     def jwt_key(self) -> Optional[str]:

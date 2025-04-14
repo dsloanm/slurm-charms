@@ -129,10 +129,11 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-limits",
             ]
 
+            pkgs = ["nfs-kernel-server", "autofs"]
             try:
-                apt.add_package("nfs-kernel-server")
+                apt.add_package(pkgs)
             except (apt.PackageNotFoundError, apt.PackageError) as e:
-                raise SlurmOpsError(f"failed to install nfs-kernel-server package. reason: {e}")
+                raise SlurmOpsError(f"failed to install packages: {pkgs}. reason: {e}")
             self._setup_state_save_location_sync()
 
             if self.unit.is_leader():
@@ -566,16 +567,10 @@ class SlurmctldCharm(CharmBase):
             profiling_parameters = self._assemble_profiling_params()
             logger.debug(f"## profiling_params: {profiling_parameters}")
 
-        # FIXME: this is overwriting constants
-        if self._stored.save_state_location:
-            CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"] = self._stored.save_state_location
-        if self._stored.jwt_key_path:
-            CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["AuthAltParameters"] = {"jwt_key": self._stored.jwt_key_path}
-
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            #SlurmctldAddr=self._ingress_address,
-            SlurmctldHost=self._slurmctld_peer.hostnames,
+            #SlurmctldAddr=self._ingress_address, # TODO: confirm safe to remove
+            SlurmctldHost=self._slurmctld_peer.controllers.split(","), # Note: order of this list determines failover order
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
@@ -667,35 +662,27 @@ class SlurmctldCharm(CharmBase):
         """Promote this backup controller to the new primary."""
         # Everyone needs to:
         #   - Stop rsync
-        #   - Unmount old checkpoints-primary
+        #   - Unmount old checkpoints-active
         # Backups only (not new primary) need to:
-        #   - Mount new checkpoints-primary
+        #   - Mount new checkpoints-active
         #   - Restart rsync
         # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
         systemd.stop("checkpoint-sync.timer")
-        try:
-            # TODO: Is --lazy needed? What if this hangs?
-            subprocess.check_output(["umount", "--force", CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]])
-        except subprocess.CalledProcessError as e:
-            raise SlurmOpsError(f"failed to unmount primary checkpoint directory, reason: {e}")
 
-
-    def get_instances(self):
+    def get_activate_instance(self) -> Optional[str]:
+        """Return the hostname of the active controller instance. Return None if no controllers are active."""
         # TODO: add caching+timeout and flush:bool argument to avoid repeated scontrol calls?
         # Example ping output:
-        # {'pings': [{'hostname': 'juju-829e74-84', 'pinged': 'DOWN', 'latency': 1850, 'mode': 'primary'}, {'hostname': 'juju-829e74-85', 'pinged': 'DOWN', 'latency': 1278, 'mode': 'backup1'}, {'hostname': 'juju-829e74-86', 'pinged': 'DOWN', 'latency': 984, 'mode': 'backup2'}], 'meta': {'plugin': {'type': '', 'name': '', 'data_parser': 'data_parser/v0.0.40', 'accounting_storage': ''}, 'client': {'source': '/dev/pts/0', 'user': 'ubuntu', 'group': 'ubuntu'}, 'command': [], 'slurm': {'version': {'major': '23', 'micro': '4', 'minor': '11'}, 'release': '23.11.4', 'cluster': 'charmed-hpc-pbge'}}, 'errors': [], 'warnings': []}
-        primary = ""
-        backups = []
+        # {'pings': [{'hostname': 'juju-829e74-84', 'pinged': 'DOWN', 'latency': 1850, 'mode': 'primary'}, {'hostname': 'juju-829e74-85', 'pinged': 'UP', 'latency': 1278, 'mode': 'backup1'}, {'hostname': 'juju-829e74-86', 'pinged': 'UP', 'latency': 984, 'mode': 'backup2'}], 'meta': {'plugin': {'type': '', 'name': '', 'data_parser': 'data_parser/v0.0.40', 'accounting_storage': ''}, 'client': {'source': '/dev/pts/0', 'user': 'ubuntu', 'group': 'ubuntu'}, 'command': [], 'slurm': {'version': {'major': '23', 'micro': '4', 'minor': '11'}, 'release': '23.11.4', 'cluster': 'charmed-hpc-pbge'}}, 'errors': [], 'warnings': []}
         ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
         logger.debug("scontrol ping output: %s", ping_output)
 
+        # Slurm fails over to controllers in order. Active instance is the first that is "UP".
         for host in ping_output["pings"]:
-            if host["mode"] == "primary":
-                primary = host["hostname"]
-            else:
-                backups.append(host["hostname"])
+            if host["pinged"] == "UP":
+                return host["hostname"]
 
-        return primary, backups
+        return None
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
