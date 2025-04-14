@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    CHECKPOINT_AUTOFS_MASTER,
     CHECKPOINT_SYNC_SERVICE,
     CHECKPOINT_SYNC_TIMER,
     PEER_RELATION,
@@ -25,7 +26,7 @@ from hpc_libs.is_container import is_container
 from hpc_libs.slurm_ops import SlurmctldManager, SlurmOpsError
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
 from interface_sackd import Sackd
-from interface_slurmctld_peer import SlurmctldPeer, SlurmctldPeerError
+from interface_slurmctld_peer import BackupReconfiguredEvent, SlurmctldPeer, SlurmctldPeerError
 from interface_slurmd import (
     PartitionAvailableEvent,
     PartitionUnavailableEvent,
@@ -41,7 +42,10 @@ from ops import (
     ActiveStatus,
     BlockedStatus,
     CharmBase,
+    CharmEvents,
     ConfigChangedEvent,
+    EventBase,
+    EventSource,
     InstallEvent,
     StartEvent,
     StoredState,
@@ -58,10 +62,20 @@ import charms.operator_libs_linux.v1.systemd as systemd
 logger = logging.getLogger()
 
 
+class FailoverEvent(EventBase):
+    """Emitted when an HA failover occurs."""
+
+
+class HAEvents(CharmEvents):
+    """High Availability events."""
+    failover = EventSource(FailoverEvent)
+
+
 class SlurmctldCharm(CharmBase):
     """Slurmctld lifecycle events."""
 
     _stored = StoredState()
+    on = HAEvents()
 
     def __init__(self, *args):
         """Init _stored attributes and interfaces, observe events."""
@@ -102,6 +116,8 @@ class SlurmctldCharm(CharmBase):
             self.on.start: self._on_start,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
+            self.on.failover: self._failover,
+            self._slurmctld_peer.on.backup_reconfigured: self._on_backup_reconfigured,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -658,7 +674,7 @@ class SlurmctldCharm(CharmBase):
         Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
         systemd.daemon_reload()
 
-    def _failover(self) -> None:
+    def _failover(self, event) -> None:
         """Promote this backup controller to the new primary."""
         # Everyone needs to:
         #   - Stop rsync
@@ -667,7 +683,30 @@ class SlurmctldCharm(CharmBase):
         #   - Mount new checkpoints-active
         #   - Restart rsync
         # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
-        systemd.stop("checkpoint-sync.timer")
+        logger.warning("failover event occurred. this unit is now the active controller")
+        systemd.service_stop("checkpoint-sync.timer")
+        systemd.service_disable("checkpoint-sync.timer")
+        # TODO: is blanking autofs config enough to unmount?
+        Path("/etc/auto.master.d/checkpoint.autofs").write_text("")
+        Path("/etc/auto.checkpoint").write_text("")
+        systemd.service_reload("autofs", restart_on_failure=True)
+        # TODO Writing into peer relation just to force a "_on_relation_changed" for other units. Find a better way.
+        self._slurmctld_peer._relation.data[self.unit]["failover"] = "yes"
+
+    def _on_backup_reconfigured(self, event: BackupReconfiguredEvent):
+        # All backups mount the active instances's state save location then periodically sync with their own state save location
+        mount_point_active = Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active")
+        mount_point_active.mkdir(parents=True, exist_ok=True)
+        Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
+        Path("/etc/auto.checkpoint").write_text(f"{mount_point_active} -ro {event.active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
+
+        try:
+            systemd.service_reload("autofs", restart_on_failure=True)
+            systemd.service_enable("checkpoint-sync.timer")
+            systemd.service_start("checkpoint-sync.timer")
+        except systemd.SystemdError:
+            logger.exception("failed to set up checkpoint synchronization")
+            # TODO: raise exception
 
     def get_activate_instance(self) -> Optional[str]:
         """Return the hostname of the active controller instance. Return None if no controllers are active."""

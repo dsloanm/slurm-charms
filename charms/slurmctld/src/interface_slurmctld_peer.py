@@ -16,7 +16,9 @@ from constants import (
 )
 from ops import (
     EventBase,
+    EventSource,
     Object,
+    ObjectEvents,
     RelationChangedEvent,
     RelationCreatedEvent,
     RelationJoinedEvent,
@@ -28,10 +30,6 @@ import charms.operator_libs_linux.v1.systemd as systemd
 logger = logging.getLogger()
 
 
-class PartitionAvailableEvent(EventBase):
-    """Emitted when slurmd application partition data is available on the relation."""
-
-
 class SlurmctldPeerError(Exception):
     """Exception raised from slurmctld-peer interface errors."""
 
@@ -41,8 +39,34 @@ class SlurmctldPeerError(Exception):
         return self.args[0]
 
 
+class BackupReconfiguredEvent(EventBase):
+    """Emitted when a backup controller has been reconfigured."""
+
+    def __init__(self, handle, active_host):
+        super().__init__(handle)
+        self.active_host = active_host
+
+    def snapshot(self):
+        """Snapshot the event data."""
+        return {
+            "active_host": self.active_host,
+        }
+
+    def restore(self, snapshot):
+        """Restore the snapshot of the event data."""
+        self.active_host = snapshot.get("active_host")
+
+
+class Events(ObjectEvents):
+    """Interface events."""
+
+    backup_reconfigured = EventSource(BackupReconfiguredEvent)
+
+
 class SlurmctldPeer(Object):
     """SlurmctldPeer Interface."""
+
+    on = Events()  # pyright: ignore [reportIncompatibleMethodOverride, reportAssignmentType]
 
     def __init__(self, charm, relation_name):
         """Initialize the interface."""
@@ -125,24 +149,9 @@ class SlurmctldPeer(Object):
             self._charm._slurmctld.munge.service.restart()
             self._charm._slurmctld.service.restart()
 
-        # TODO: emit an event here and move everything below this to main charm?
         active = self._charm.get_activate_instance()
-        if active == self._charm.hostname:
-            return
-
-        # All backups mount the active instances's state save location then periodically sync with their own state save location
-        mount_point_active = Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active")
-        mount_point_active.mkdir(parents=True, exist_ok=True)
-        Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
-        Path("/etc/auto.checkpoint").write_text(f"{mount_point_active} -ro {active}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
-
-        try:
-            systemd.service_reload("autofs", restart_on_failure=True)
-            systemd.service_enable("checkpoint-sync.timer")
-            systemd.service_start("checkpoint-sync.timer")
-        except systemd.SystemdError:
-            logger.exception("failed to set up checkpoint synchronization")
-            # TODO: raise exception
+        if self._charm.hostname is not active:
+            self.on.backup_reconfigured.emit(active)
 
     def _property_get(self, property_name) -> Optional[str]:
         """Return the property from app relation data."""
