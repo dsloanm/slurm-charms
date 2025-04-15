@@ -10,6 +10,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -144,6 +145,25 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-diags",
                 "-slurm.collect-limits",
             ]
+
+            # HA mount point. NFS share of active slurmctld instance checkpoint directory.
+            Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active").mkdir(parents=True, exist_ok=True)
+
+            # Program executed by slurmctld when a HA backup instance takes over from the primary
+            primary_on = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["SlurmctldPrimaryOnProg"])
+            primary_on.parent.mkdir(parents=True, exist_ok=True)
+            exec_cmd = f"/usr/bin/juju-exec JUJU_DISPATCH_PATH=hooks/failover {self.charm_dir}/dispatch"
+            primary_on.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/bash
+                    /usr/bin/sudo {exec_cmd}
+                    """
+                )
+            )
+            primary_on.chmod(0o755)
+            # HACK FIXME: juju-exec needs to run as root but slurmctld runs as the slurm user. Give slurm user sudo access(!) here.
+            Path("/etc/sudoers.d/slurm").write_text(f"slurm ALL=(root) NOPASSWD: {exec_cmd}")
 
             pkgs = ["nfs-kernel-server", "autofs"]
             try:
@@ -675,30 +695,24 @@ class SlurmctldCharm(CharmBase):
         systemd.daemon_reload()
 
     def _failover(self, event) -> None:
-        """Promote this backup controller to the new primary."""
-        # Everyone needs to:
-        #   - Stop rsync
-        #   - Unmount old checkpoints-active
-        # Backups only (not new primary) need to:
-        #   - Mount new checkpoints-active
-        #   - Restart rsync
-        # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
+        """Promote this backup to the new active controller."""
         logger.warning("failover event occurred. this unit is now the active controller")
+        # Stop rsync and unmount checkpoints directory from old active
+        # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
         systemd.service_stop("checkpoint-sync.timer")
         systemd.service_disable("checkpoint-sync.timer")
         # TODO: is blanking autofs config enough to unmount?
         Path("/etc/auto.master.d/checkpoint.autofs").write_text("")
         Path("/etc/auto.checkpoint").write_text("")
         systemd.service_reload("autofs", restart_on_failure=True)
-        # TODO Writing into peer relation just to force a "_on_relation_changed" for other units. Find a better way.
-        self._slurmctld_peer._relation.data[self.unit]["failover"] = "yes"
+
+        # Inform remaining units of failover
+        self._slurmctld_peer.failover()
 
     def _on_backup_reconfigured(self, event: BackupReconfiguredEvent):
         # All backups mount the active instances's state save location then periodically sync with their own state save location
-        mount_point_active = Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active")
-        mount_point_active.mkdir(parents=True, exist_ok=True)
         Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
-        Path("/etc/auto.checkpoint").write_text(f"{mount_point_active} -ro {event.active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
+        Path("/etc/auto.checkpoint").write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active -ro,soft,retrans=1,retry=0 {event.active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
 
         try:
             systemd.service_reload("autofs", restart_on_failure=True)

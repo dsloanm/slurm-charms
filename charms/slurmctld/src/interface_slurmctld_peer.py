@@ -11,7 +11,6 @@ from typing import Optional
 
 from constants import (
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
-    CHECKPOINT_AUTOFS_MASTER,
     CLUSTER_NAME_PREFIX
 )
 from ops import (
@@ -123,6 +122,11 @@ class SlurmctldPeer(Object):
             self._charm._on_write_slurm_conf(event)
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
+        # Clear any failover flag TODO: does this trigger another relation-changed?
+        if "failover" in self._relation.data[self._charm.unit]:
+            del self._relation.data[self._charm.unit]["failover"]
+
+        # TODO: Can we skip this if handling a failover?
         # TODO: Clean up this logic - this happening before _on_relation_joined is breaking things
         # TODO: If the primary isn't the leader, we need to write out config files but not mount/sync the checkpoint directory...
         if not self._charm.unit.is_leader():
@@ -181,6 +185,14 @@ class SlurmctldPeer(Object):
         controllers = self._property_get("controllers").split(",")
         controllers.remove(hostname)
         self._property_set("controllers", controllers)
+
+    def failover(self) -> None:
+        """Trigger a failover event to this unit."""
+        # Causes a relation-changed event on all units to reconfigure NFS shares
+        # Use an incrementing counter to ensure a new value is written
+        unit_data = self._relation.data[self._charm.unit]
+        unit_data["failover"] = str(int(unit_data.get("failover", "0")) + 1)
+        logger.debug("unit databag post-failover: %s", self._relation.data[self._charm.unit])
 
     @property
     def auth_key(self) -> Optional[str]:

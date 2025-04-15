@@ -28,6 +28,7 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "PlugStackConfig": "/etc/slurm/plugstack.conf.d/plugstack.conf",
     "SelectType": "select/cons_tres",
     "SelectTypeParameters": "CR_CPU_Memory",
+    "SlurmctldPrimaryOnProg": "/usr/local/bin/primary_on.sh",
     "SlurmctldPort": "6817",
     "SlurmdPort": "6818",
     "StateSaveLocation": "/var/lib/slurm/checkpoint",
@@ -63,3 +64,5 @@ OnUnitActiveSec=5sec
 [Install]
 WantedBy=timers.target
 """
+
+
