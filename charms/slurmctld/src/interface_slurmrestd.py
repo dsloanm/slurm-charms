@@ -50,10 +50,13 @@ class Slurmrestd(Object):
 
     @property
     def is_joined(self) -> bool:
-        """Return True if relation is joined."""
-        return True if self.model.relations.get(self._relation_name) else False
+        """Return True if relation(s) are joined."""
+        return all(self.model.relations.get(self._relation_name, ()))
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
+        if not self.framework.model.unit.is_leader():
+            return
+
         # Check that slurm has been installed so that we know the munge key is
         # available. Defer if slurm has not been installed yet.
         if not self._charm.slurm_installed:
@@ -70,7 +73,7 @@ class Slurmrestd(Object):
         self.on.slurmrestd_unavailable.emit()
 
     def set_slurm_config_on_app_relation_data(self, slurm_config: str) -> None:
-        """Set the slurm_conifg to the app data on the relation.
+        """Set the slurm_config to the app data on the relation.
 
         Setting data on the relation forces the units of related applications
         to observe the relation-changed event so they can acquire and
