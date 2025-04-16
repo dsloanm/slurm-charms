@@ -135,10 +135,11 @@ class Slurmctld(Object):
 
     def set_node(self) -> None:
         """Set the node on the unit data."""
-        if relation := self._relation:
-            relation.data[self.model.unit]["node"] = json.dumps(self._charm.get_node())
-        else:
-            logger.debug("No relation, cannot set 'node'.")
+        for relation in self._relations:
+            if relation:
+                relation.data[self.model.unit]["node"] = json.dumps(self._charm.get_node())
+            else:
+                logger.debug("No relation, cannot set 'node'.")
 
     def set_partition(self) -> None:
         """Set the slurmd partition on the app relation data.
@@ -147,17 +148,18 @@ class Slurmctld(Object):
         slurmctld application(s) to observe the relation-changed
         event so they can acquire and redistribute the updated slurm config.
         """
-        if relation := self._relation:
-            relation.data[self.model.app]["partition"] = json.dumps(self._charm.get_partition())
-        else:
-            logger.debug("No relation, cannot set 'partition'.")
+        for relation in self._relations:
+            if relation:
+                relation.data[self.model.app]["partition"] = json.dumps(self._charm.get_partition())
+            else:
+                logger.debug("No relation, cannot set 'partition'.")
 
     @property
-    def _relation(self) -> Union[Relation, None]:
-        """Return the relation."""
-        return self.model.get_relation(self._relation_name)
+    def _relations(self) -> Union[Relation, None]:
+        """Return the relation(s)."""
+        return self.model.relations.get(self._relation_name, ())
 
     @property
     def is_joined(self) -> bool:
-        """Return True if relation is joined."""
-        return True if self.model.relations.get(self._relation_name) else False
+        """Return True if relation(s) are joined."""
+        return all(self.model.relations.get(self._relation_name, ()))
