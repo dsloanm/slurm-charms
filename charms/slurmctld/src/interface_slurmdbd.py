@@ -73,6 +73,9 @@ class Slurmdbd(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         """Perform relation-created event operations."""
+        if not self.framework.model.unit.is_leader():
+            return
+
         # Check that slurm has been installed so that we know the munge key is
         # available. Defer if slurm has not been installed yet.
         if not self._charm.slurm_installed:
