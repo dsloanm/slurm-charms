@@ -114,11 +114,6 @@ class Slurmctld(Object):
         self.on.slurmctld_unavailable.emit()
 
     @property
-    def _relation(self) -> Union[Relation, None]:
-        """Return the relation."""
-        return self.model.get_relation(self._relation_name)
-
-    @property
     def is_joined(self) -> bool:
-        """Return True if relation is joined."""
-        return True if self.model.relations.get(self._relation_name) else False
+        """Return True if relation(s) are joined."""
+        return all(self.model.relations.get(self._relation_name, ()))

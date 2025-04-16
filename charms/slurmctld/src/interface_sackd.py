@@ -29,6 +29,9 @@ class Sackd(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         """Set our data on the relation."""
+        if not self.framework.model.unit.is_leader():
+            return
+
         # Need to wait until the charm has installed slurm before we can proceed.
         if not self._charm.slurm_installed:
             event.defer()
