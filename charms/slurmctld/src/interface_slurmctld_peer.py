@@ -131,6 +131,12 @@ class SlurmctldPeer(Object):
         # TODO: If the primary isn't the leader, we need to write out config files but not mount/sync the checkpoint directory...
         if not self._charm.unit.is_leader():
             slurmctld_info = json.loads(self._relation.data[self.model.app]["slurmctld_info"])
+
+            if "slurm_conf" not in slurmctld_info:
+                logger.debug("leader yet to add slurm configuration to peer relation. deferring event")
+                event.defer()
+                return
+
             slurm_conf = SlurmConfig.from_str(slurmctld_info["slurm_conf"])
 
             if self._charm.hostname not in slurm_conf.slurmctld_host:
