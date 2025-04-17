@@ -182,16 +182,18 @@ class SlurmctldPeer(Object):
         return self._property_get("controllers")
 
     def add_controller(self, hostname: str) -> None:
-        """Append the given hostname to the list of controllers."""
+        """Append the given hostname to the list of controllers if not already present."""
         controllers = self._property_get("controllers")
-        controllers += f",{hostname}"
-        self._property_set("controllers", controllers)
+        if hostname not in controllers:
+            controllers += f",{hostname}"
+            self._property_set("controllers", controllers)
 
     def remove_controller(self, hostname: str) -> None:
         """Remove the given hostname to the list of controllers."""
         controllers = self._property_get("controllers").split(",")
+        # TODO handle ValueError if hostname not in list
         controllers.remove(hostname)
-        self._property_set("controllers", controllers)
+        self._property_set("controllers", ",".join(controllers))
 
     def failover(self) -> None:
         """Trigger a failover event to this unit."""

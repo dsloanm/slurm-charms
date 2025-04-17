@@ -24,24 +24,24 @@ class SlurmctldAvailableEvent(EventBase):
         self,
         handle,
         auth_key,
-        slurmctld_host,
+        slurmctld_hosts,
     ):
         super().__init__(handle)
 
         self.auth_key = auth_key
-        self.slurmctld_host = slurmctld_host
+        self.slurmctld_hosts = slurmctld_hosts
 
     def snapshot(self):
         """Snapshot the event data."""
         return {
             "auth_key": self.auth_key,
-            "slurmctld_host": self.slurmctld_host,
+            "slurmctld_hosts": self.slurmctld_hosts,
         }
 
     def restore(self, snapshot):
         """Restore the snapshot of the event data."""
         self.auth_key = snapshot.get("auth_key")
-        self.slurmctld_host = snapshot.get("slurmctld_host")
+        self.slurmctld_hosts = snapshot.get("slurmctld_hosts")
 
 
 class SlurmctldUnavailableEvent(EventBase):
