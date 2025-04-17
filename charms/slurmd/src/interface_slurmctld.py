@@ -26,27 +26,27 @@ class SlurmctldAvailableEvent(EventBase):
         handle,
         munge_key,
         nhc_params,
-        slurmctld_host,
+        slurmctld_hosts,
     ):
         super().__init__(handle)
 
         self.munge_key = munge_key
         self.nhc_params = nhc_params
-        self.slurmctld_host = slurmctld_host
+        self.slurmctld_hosts = slurmctld_hosts
 
     def snapshot(self):
         """Snapshot the event data."""
         return {
             "munge_key": self.munge_key,
             "nhc_params": self.nhc_params,
-            "slurmctld_host": self.slurmctld_host,
+            "slurmctld_hosts": self.slurmctld_hosts,
         }
 
     def restore(self, snapshot):
         """Restore the snapshot of the event data."""
         self.munge_key = snapshot.get("munge_key")
         self.nhc_params = snapshot.get("nhc_params")
-        self.slurmctld_host = snapshot.get("slurmctld_host")
+        self.slurmctld_hosts = snapshot.get("slurmctld_hosts")
 
 
 class SlurmctldUnavailableEvent(EventBase):

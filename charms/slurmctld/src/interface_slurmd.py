@@ -108,7 +108,7 @@ class Slurmd(Object):
         event.relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "munge_key": self._charm.get_munge_key(),
-                "slurmctld_host": self._charm.hostname,
+                "slurmctld_hosts": self._charm._slurmctld_peer.controllers,
                 "nhc_params": health_check_params,
             }
         )
