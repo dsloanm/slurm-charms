@@ -158,6 +158,7 @@ class SlurmctldPeer(Object):
 
             self._charm._slurmctld.munge.service.restart()
             self._charm._slurmctld.service.restart()
+            self._charm._check_status()
 
         active = self._charm.get_activate_instance()
         if self._charm.hostname is not active:

@@ -684,7 +684,7 @@ class SlurmctldCharm(CharmBase):
         export.write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]} {hostname}(ro,no_subtree_check)\n")
 
         try:
-            subprocess.check_output(["exportfs", "-a", "-r"])
+            subprocess.check_call(["/usr/sbin/exportfs", "-a", "-r"])
         except subprocess.CalledProcessError as e:
             raise SlurmOpsError(f"failed to NFS export checkpoint directory, reason: {e}")
 
@@ -697,11 +697,8 @@ class SlurmctldCharm(CharmBase):
     def _failover(self, event) -> None:
         """Promote this backup to the new active controller."""
         logger.warning("failover event occurred. this unit is now the active controller")
-        # Stop rsync and unmount checkpoints directory from old active
-        # TODO: what if rsync is running and stuck trying to copy from an unresponsive mount point? Need to `systemctl stop` or `systemctl kill` checkpoint-sync.service?
-        systemd.service_stop("checkpoint-sync.timer")
-        systemd.service_disable("checkpoint-sync.timer")
-        # TODO: is blanking autofs config enough to unmount?
+        self._stop_sync()
+
         Path("/etc/auto.master.d/checkpoint.autofs").write_text("")
         Path("/etc/auto.checkpoint").write_text("")
         systemd.service_reload("autofs", restart_on_failure=True)
@@ -709,7 +706,28 @@ class SlurmctldCharm(CharmBase):
         # Inform remaining units of failover
         self._slurmctld_peer.failover()
 
+    def _stop_sync(self) -> None:
+        # Stop rsync and unmount checkpoints directory from old active
+        systemd.service_disable("checkpoint-sync.timer")
+        systemd.service_stop("checkpoint-sync.timer")
+        # TODO: try this and fall back to `systemctl kill --signal=9 checkpoint-sync.service` in case of timeout?
+        systemd.service_stop("checkpoint-sync.service")
+        # TODO: confirm this manual unmount is needed. Can AutoFS force unmount a stuck NFS share?
+        # TODO: do we want --lazy?
+        active_dir = f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active"
+        try:
+            subprocess.check_call(["/usr/bin/umount", "--quiet", "--force", active_dir])
+        except subprocess.CalledProcessError as e:
+            # Unmount can fail if path is currently not mounted, e.g. unit is starting up and path hasn't been mounted before
+            # --quiet suppresses "not mounted" error messages but still gives a non-zero exit code
+            # Ignore errors that print no output
+            if e.stderr or e.output:
+                raise SlurmOpsError(f"failed to unmount NFS checkpoint directory {active_dir}, reason: {e}")
+
     def _on_backup_reconfigured(self, event: BackupReconfiguredEvent):
+        # Stop any existing sync operations in case of failover.
+        self._stop_sync()
+
         # All backups mount the active instances's state save location then periodically sync with their own state save location
         Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
         Path("/etc/auto.checkpoint").write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active -ro,soft,retrans=1,retry=0 {event.active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")

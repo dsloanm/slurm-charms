@@ -49,9 +49,10 @@ Description=Slurm checkpoint directory sync
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/rsync --delete -a /var/lib/slurm/checkpoint-active/ /var/lib/slurm/checkpoint/
+ExecStart=/usr/bin/rsync --timeout 5 --delete -a /var/lib/slurm/checkpoint-active/ /var/lib/slurm/checkpoint/
 User=slurm
 Group=slurm
+TimeoutStopSec=180
 """
 
 CHECKPOINT_SYNC_TIMER = """[Unit]
