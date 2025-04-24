@@ -48,3 +48,12 @@ class Sackd(Object):
         """Clear the cluster info if the relation is broken."""
         if self.framework.model.unit.is_leader():
             event.relation.data[self.model.app]["cluster_info"] = ""
+
+    def update_controllers(self) -> None:
+        """Synchronizes the current set of slurmctld controllers with data on the relation."""
+        for rel in self.model.relations.get(self._relation_name, ()):
+            if rel and "cluster_info" in rel.data[self.model.app]:
+                cluster_info = json.loads(rel.data[self.model.app]["cluster_info"])
+                cluster_info["slurmctld_hosts"] = self._charm._slurmctld_peer.controllers
+                rel.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
+                logger.debug("sackd cluster_info set to %s", cluster_info)

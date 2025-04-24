@@ -187,6 +187,10 @@ class SlurmctldPeer(Object):
         if hostname not in controllers:
             controllers += f",{hostname}"
             self._property_set("controllers", controllers)
+            # TODO make this a custom event handled by main slurmctld charm?
+            # Update list of controllers on other Slurm services
+            self._charm._sackd.update_controllers()
+            self._charm._slurmd.update_controllers()
 
     def remove_controller(self, hostname: str) -> None:
         """Remove the given hostname to the list of controllers."""

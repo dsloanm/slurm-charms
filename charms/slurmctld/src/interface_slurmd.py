@@ -297,3 +297,12 @@ class Slurmd(Object):
                             # Get the NodeName and append to the partition nodes
                             nodes.append(node_config["NodeName"])
         return nodes
+
+    def update_controllers(self) -> None:
+        """Synchronizes the current set of slurmctld controllers with data on the relation."""
+        for rel in self.model.relations.get(self._relation_name, ()):
+            if rel and "cluster_info" in rel.data[self.model.app]:
+                cluster_info = json.loads(rel.data[self.model.app]["cluster_info"])
+                cluster_info["slurmctld_hosts"] = self._charm._slurmctld_peer.controllers
+                rel.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
+                logger.debug("slurmd cluster_info set to %s", cluster_info)
