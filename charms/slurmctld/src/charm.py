@@ -6,28 +6,26 @@
 
 import json
 import logging
-import secrets
 import shlex
-import shutil
 import subprocess
-import textwrap
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
-    CHECKPOINT_AUTOFS_MASTER,
-    CHECKPOINT_SYNC_SERVICE,
-    CHECKPOINT_SYNC_TIMER,
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
+from high_availability import HAEvents
 from hpc_libs.is_container import is_container
 from hpc_libs.slurm_ops import SlurmctldManager, SlurmOpsError
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
 from interface_sackd import Sackd
-from interface_slurmctld_peer import BackupReconfiguredEvent, SlurmctldPeer, SlurmctldPeerError
+from interface_slurmctld_peer import (
+    SlurmctldAvailableEvent,
+    SlurmctldPeer,
+    SlurmctldPeerConfiguredEvent,
+)
 from interface_slurmd import (
     PartitionAvailableEvent,
     PartitionUnavailableEvent,
@@ -43,10 +41,7 @@ from ops import (
     ActiveStatus,
     BlockedStatus,
     CharmBase,
-    CharmEvents,
     ConfigChangedEvent,
-    EventBase,
-    EventSource,
     InstallEvent,
     StartEvent,
     StoredState,
@@ -57,26 +52,16 @@ from ops import (
 from slurmutils.models import AcctGatherConfig, CgroupConfig, GRESConfig, GRESNode, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
-import charms.operator_libs_linux.v0.apt as apt
-import charms.operator_libs_linux.v1.systemd as systemd
 
 logger = logging.getLogger()
-
-
-class FailoverEvent(EventBase):
-    """Emitted when an HA failover occurs."""
-
-
-class HAEvents(CharmEvents):
-    """High Availability events."""
-    failover = EventSource(FailoverEvent)
 
 
 class SlurmctldCharm(CharmBase):
     """Slurmctld lifecycle events."""
 
-    _stored = StoredState()
+    # TODO: explain why overriding on
     on = HAEvents()
+    _stored = StoredState()
 
     def __init__(self, *args):
         """Init _stored attributes and interfaces, observe events."""
@@ -118,7 +103,8 @@ class SlurmctldCharm(CharmBase):
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
             self.on.failover: self._failover,
-            self._slurmctld_peer.on.backup_reconfigured: self._on_backup_reconfigured,
+            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
+            self._slurmctld_peer.on.slurmctld_peer_configured: self._on_slurmctld_peer_configured,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -146,32 +132,6 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-limits",
             ]
 
-            # HA mount point. NFS share of active slurmctld instance checkpoint directory.
-            Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active").mkdir(parents=True, exist_ok=True)
-
-            # Program executed by slurmctld when a HA backup instance takes over from the primary
-            primary_on = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["SlurmctldPrimaryOnProg"])
-            primary_on.parent.mkdir(parents=True, exist_ok=True)
-            exec_cmd = f"/usr/bin/juju-exec JUJU_DISPATCH_PATH=hooks/failover {self.charm_dir}/dispatch"
-            primary_on.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/bin/bash
-                    /usr/bin/sudo {exec_cmd}
-                    """
-                )
-            )
-            primary_on.chmod(0o755)
-            # HACK FIXME: juju-exec needs to run as root but slurmctld runs as the slurm user. Give slurm user sudo access(!) here.
-            Path("/etc/sudoers.d/slurm").write_text(f"slurm ALL=(root) NOPASSWD: {exec_cmd}")
-
-            pkgs = ["nfs-kernel-server", "autofs"]
-            try:
-                apt.add_package(pkgs)
-            except (apt.PackageNotFoundError, apt.PackageError) as e:
-                raise SlurmOpsError(f"failed to install packages: {pkgs}. reason: {e}")
-            self._setup_state_save_location_sync()
-
             if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
@@ -197,10 +157,8 @@ class SlurmctldCharm(CharmBase):
         """
         try:
             self._slurmctld.munge.service.restart()
-
             self._slurmctld.service.enable()
-            # Leader's slurmctld service is started in this function.
-            # Peers do not start slurmctld until their relation_changed event.
+            # (Leader's) slurmctld service is started within this function.
             self._on_write_slurm_conf(event)
 
             self._slurmctld.exporter.service.enable()
@@ -246,6 +204,26 @@ class SlurmctldCharm(CharmBase):
     def _on_show_current_config_action(self, event: ActionEvent) -> None:
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
+
+    def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
+        """Update slurmctld configuration and list of controllers on all Slurm services."""
+        # gres.conf update not needed - new slurmctld controllers joining does not change gres.conf
+        self._on_write_slurm_conf(event)
+        self._sackd.update_controllers()
+        self._slurmd.update_controllers()
+
+    def _on_slurmctld_peer_configured(self, event: SlurmctldPeerConfiguredEvent) -> None:
+        """Write out slurmctld configuration on peer controllers in an HA setup."""
+        cluster_info = json.loads(self._slurmctld_peer.cluster_info)
+
+        self._slurmctld.config.dump(cluster_info["slurm_conf"])
+        if gres_conf := cluster_info.get("gres_conf"):
+            self._slurmctld.gres.dump(gres_conf)
+        self._slurmctld.munge.key.set(cluster_info["auth_key"])
+
+        self._slurmctld.munge.service.restart()
+        self._slurmctld.service.restart()
+        self._check_status()
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
@@ -338,49 +316,6 @@ class SlurmctldCharm(CharmBase):
         except subprocess.CalledProcessError as e:
             event.fail(message=f"Error resuming {nodes}: {e.output}")
 
-    def _on_migrate_state_save_location_action(self, event: ActionEvent) -> None:
-        """Migrate StateSaveLocation to specified directory."""
-        if not self.unit.is_leader():
-            event.fail(message="error: action must be run on leader unit")
-            return
-
-        results = {}
-        dst = Path(event.params["new-location"])
-        dst.mkdir(parents=True, exist_ok=True)
-        shutil.chown(dst, user="slurm", group="slurm")
-
-        with self._slurmctld.config.edit() as config:
-            src = Path(config.state_save_location)
-            config.state_save_location = dst
-            self._stored.save_state_location = str(dst)
-            results["state-save-location"] = config.state_save_location
-
-            # JWT key requires migration if it is also in the checkpoint directory
-            if key_val := config.auth_alt_parameters.get("jwt_key"):
-                key_path = Path(key_val)
-                if key_path.is_relative_to(src):
-                    relative = key_path.relative_to(src)
-                    config.auth_alt_parameters["jwt_key"] = dst / relative
-                    self._stored.jwt_key_path = str(dst / relative)
-                    results["jwt-key"] = config.auth_alt_parameters["jwt_key"]
-
-            # Update slurm.conf data for backup slurmctld units
-            self._slurmctld_peer.slurm_conf = str(config)
-
-        self._slurmctld.service.stop()
-
-        shutil.copytree(src, dst, copy_function=shutil.copy2, dirs_exist_ok=True)
-        # Ownership is not preserved with copy. Fix here.
-        for path in Path(dst).rglob("*"):
-            shutil.chown(path, user="slurm", group="slurm")
-
-        self._slurmctld.service.start()
-        # TODO determine best way to sync directories.
-        # Safer would be to copy first, stop service, sync delta, restart service.
-
-        shutil.rmtree(src)
-        event.set_results(results)
-
     def _on_slurmd_available(self, event: SlurmdAvailableEvent) -> None:
         """Triggers when a slurmd unit joins the relation."""
         self._update_gres_conf(event)
@@ -438,6 +373,7 @@ class SlurmctldCharm(CharmBase):
 
             with self._slurmctld.gres.edit() as config:
                 config.nodes[node_name] = gres_nodes
+                self._slurmctld_peer.gres_conf = str(config)
 
     def _refresh_gres_conf(self, event: SlurmdDepartedEvent) -> None:
         """Write out current gres.conf configuration file for Generic Resource scheduling.
@@ -605,8 +541,10 @@ class SlurmctldCharm(CharmBase):
 
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            #SlurmctldAddr=self._ingress_address, # TODO: confirm safe to remove
-            SlurmctldHost=self._slurmctld_peer.controllers.split(","), # Note: order of this list determines failover order
+            # SlurmctldAddr=self._ingress_address, # TODO: confirm safe to remove
+            SlurmctldHost=self._slurmctld_peer.controllers.split(
+                ","
+            ),  # Note: order of this list determines failover order
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
@@ -675,85 +613,6 @@ class SlurmctldCharm(CharmBase):
 
         self.unit.status = ActiveStatus("")
         return True
-
-    def _export_state_save_location(self, hostname) -> None:
-        """Export the Slurm StateSaveLocation to the given hostname."""
-        # TODO: write an unexport function for departing units that deletes their file from /etc/exports.d and does "exportfs -a -u"
-        export = Path(f"/etc/exports.d/{hostname}-checkpoint.exports")
-        export.parent.mkdir(parents=True, exist_ok=True)
-        export.write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]} {hostname}(ro,no_subtree_check)\n")
-
-        try:
-            subprocess.check_call(["/usr/sbin/exportfs", "-a", "-r"])
-        except subprocess.CalledProcessError as e:
-            raise SlurmOpsError(f"failed to NFS export checkpoint directory, reason: {e}")
-
-    def _setup_state_save_location_sync(self) -> None:
-        # Don't start these services here. Only the backups need to have them running.
-        Path("/etc/systemd/system/checkpoint-sync.service").write_text(CHECKPOINT_SYNC_SERVICE)
-        Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
-        systemd.daemon_reload()
-
-    def _failover(self, event) -> None:
-        """Promote this backup to the new active controller."""
-        logger.warning("failover event occurred. this unit is now the active controller")
-        self._stop_sync()
-
-        Path("/etc/auto.master.d/checkpoint.autofs").write_text("")
-        Path("/etc/auto.checkpoint").write_text("")
-        systemd.service_reload("autofs", restart_on_failure=True)
-
-        # Inform remaining units of failover
-        self._slurmctld_peer.failover()
-
-    def _stop_sync(self) -> None:
-        # Stop rsync and unmount checkpoints directory from old active
-        systemd.service_disable("checkpoint-sync.timer")
-        systemd.service_stop("checkpoint-sync.timer")
-        # TODO: try this and fall back to `systemctl kill --signal=9 checkpoint-sync.service` in case of timeout?
-        systemd.service_stop("checkpoint-sync.service")
-        # TODO: confirm this manual unmount is needed. Can AutoFS force unmount a stuck NFS share?
-        # TODO: do we want --lazy?
-        active_dir = f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active"
-        try:
-            subprocess.check_call(["/usr/bin/umount", "--quiet", "--force", active_dir])
-        except subprocess.CalledProcessError as e:
-            # Unmount can fail if path is currently not mounted, e.g. unit is starting up and path hasn't been mounted before
-            # --quiet suppresses "not mounted" error messages but still gives a non-zero exit code
-            # Ignore errors that print no output
-            if e.stderr or e.output:
-                raise SlurmOpsError(f"failed to unmount NFS checkpoint directory {active_dir}, reason: {e}")
-
-    def _on_backup_reconfigured(self, event: BackupReconfiguredEvent):
-        # Stop any existing sync operations in case of failover.
-        self._stop_sync()
-
-        # All backups mount the active instances's state save location then periodically sync with their own state save location
-        Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
-        Path("/etc/auto.checkpoint").write_text(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}-active -ro,soft,retrans=1,retry=0 {event.active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]}")
-
-        try:
-            systemd.service_reload("autofs", restart_on_failure=True)
-            systemd.service_enable("checkpoint-sync.timer")
-            systemd.service_start("checkpoint-sync.timer")
-        except systemd.SystemdError:
-            logger.exception("failed to set up checkpoint synchronization")
-            # TODO: raise exception
-
-    def get_activate_instance(self) -> Optional[str]:
-        """Return the hostname of the active controller instance. Return None if no controllers are active."""
-        # TODO: add caching+timeout and flush:bool argument to avoid repeated scontrol calls?
-        # Example ping output:
-        # {'pings': [{'hostname': 'juju-829e74-84', 'pinged': 'DOWN', 'latency': 1850, 'mode': 'primary'}, {'hostname': 'juju-829e74-85', 'pinged': 'UP', 'latency': 1278, 'mode': 'backup1'}, {'hostname': 'juju-829e74-86', 'pinged': 'UP', 'latency': 984, 'mode': 'backup2'}], 'meta': {'plugin': {'type': '', 'name': '', 'data_parser': 'data_parser/v0.0.40', 'accounting_storage': ''}, 'client': {'source': '/dev/pts/0', 'user': 'ubuntu', 'group': 'ubuntu'}, 'command': [], 'slurm': {'version': {'major': '23', 'micro': '4', 'minor': '11'}, 'release': '23.11.4', 'cluster': 'charmed-hpc-pbge'}}, 'errors': [], 'warnings': []}
-        ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
-        logger.debug("scontrol ping output: %s", ping_output)
-
-        # Slurm fails over to controllers in order. Active instance is the first that is "UP".
-        for host in ping_output["pings"]:
-            if host["pinged"] == "UP":
-                return host["hostname"]
-
-        return None
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""

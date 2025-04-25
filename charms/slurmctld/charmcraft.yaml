@@ -153,18 +153,3 @@ actions:
           The nodes to resume, using the Slurm format, e.g. `"node-[1,2]"`.
     required:
       - nodename
-
-  migrate-state-save-location:
-    description: |
-      Move the StateSaveLocation.
-
-      Note: DANGEROUS!
-
-      Example usage: $ juju run slurmctld/leader ***
-    params:
-      new-location:
-        type: string
-        description: |
-          The new location, e.g. /path/whatever.
-    required:
-      - new-location

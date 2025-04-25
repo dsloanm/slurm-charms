@@ -65,5 +65,3 @@ OnUnitActiveSec=5sec
 [Install]
 WantedBy=timers.target
 """
-
-

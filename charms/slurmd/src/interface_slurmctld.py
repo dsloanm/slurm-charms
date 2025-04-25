@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Union
+from typing import List, Union
 
 from ops import (
     EventBase,
@@ -150,12 +150,14 @@ class Slurmctld(Object):
         """
         for relation in self._relations:
             if relation:
-                relation.data[self.model.app]["partition"] = json.dumps(self._charm.get_partition())
+                relation.data[self.model.app]["partition"] = json.dumps(
+                    self._charm.get_partition()
+                )
             else:
                 logger.debug("No relation, cannot set 'partition'.")
 
     @property
-    def _relations(self) -> Union[Relation, None]:
+    def _relations(self) -> Union[List[Relation], tuple]:
         """Return the relation(s)."""
         return self.model.relations.get(self._relation_name, ())
 

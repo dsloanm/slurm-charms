@@ -2,14 +2,12 @@
 
 import json
 import logging
-from typing import Union
 
 from ops import (
     EventBase,
     EventSource,
     Object,
     ObjectEvents,
-    Relation,
     RelationBrokenEvent,
     RelationChangedEvent,
 )

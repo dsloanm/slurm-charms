@@ -299,7 +299,7 @@ class Slurmd(Object):
         return nodes
 
     def update_controllers(self) -> None:
-        """Synchronizes the current set of slurmctld controllers with data on the relation."""
+        """Synchronize the current set of slurmctld controllers with data on the relation."""
         for rel in self.model.relations.get(self._relation_name, ()):
             if rel and "cluster_info" in rel.data[self.model.app]:
                 cluster_info = json.loads(rel.data[self.model.app]["cluster_info"])
