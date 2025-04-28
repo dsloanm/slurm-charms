@@ -24,7 +24,6 @@ from interface_sackd import Sackd
 from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
     SlurmctldPeer,
-    SlurmctldPeerConfiguredEvent,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -102,9 +101,7 @@ class SlurmctldCharm(CharmBase):
             self.on.start: self._on_start,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
-            self.on.failover: self._failover,
             self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
-            self._slurmctld_peer.on.slurmctld_peer_configured: self._on_slurmctld_peer_configured,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -117,7 +114,6 @@ class SlurmctldCharm(CharmBase):
             self.on.show_current_config_action: self._on_show_current_config_action,
             self.on.drain_action: self._on_drain_nodes_action,
             self.on.resume_action: self._on_resume_nodes_action,
-            self.on.migrate_state_save_location_action: self._on_migrate_state_save_location_action,
         }
         for event, handler in event_handler_bindings.items():
             self.framework.observe(event, handler)
@@ -211,19 +207,6 @@ class SlurmctldCharm(CharmBase):
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
-
-    def _on_slurmctld_peer_configured(self, event: SlurmctldPeerConfiguredEvent) -> None:
-        """Write out slurmctld configuration on peer controllers in an HA setup."""
-        cluster_info = json.loads(self._slurmctld_peer.cluster_info)
-
-        self._slurmctld.config.dump(cluster_info["slurm_conf"])
-        if gres_conf := cluster_info.get("gres_conf"):
-            self._slurmctld.gres.dump(gres_conf)
-        self._slurmctld.munge.key.set(cluster_info["auth_key"])
-
-        self._slurmctld.munge.service.restart()
-        self._slurmctld.service.restart()
-        self._check_status()
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""

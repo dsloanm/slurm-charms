@@ -37,15 +37,10 @@ class SlurmctldAvailableEvent(EventBase):
     """Emitted when a controller observes another controller instance."""
 
 
-class SlurmctldPeerConfiguredEvent(EventBase):
-    """Emitted when a Slurmctld peer (non-leader) controller has been (re)configured."""
-
-
 class Events(ObjectEvents):
     """Interface events."""
 
     slurmctld_available = EventSource(SlurmctldAvailableEvent)
-    slurmctld_peer_configured = EventSource(SlurmctldPeerConfiguredEvent)
 
 
 class SlurmctldPeer(Object):
@@ -123,12 +118,7 @@ class SlurmctldPeer(Object):
             del self._relation.data[self._charm.unit]["failover"]
 
         # Charm leader is not necessarily the active slurmctld instance in an HA setup.
-        # Only non-active instances (backups) should sync against the active's StateSaveLocation directory.
-        active = self.ha.get_activate_instance()
-        if self._charm.hostname is not active:
-            self.ha.start_backup(active)
-
-        # The leader gathers and writes out config files (outwith this method) as only it can write to the application peer relation.
+        # The leader gathers and writes out config files into the application peer relation in the main charm code.
         # Peers (non-leaders) get their config data here from the application peer relation, as set by the leader.
         if not self._charm.unit.is_leader():
             # TODO clean up this series of checks - replace with a try/except?
@@ -148,7 +138,20 @@ class SlurmctldPeer(Object):
                 event.defer()
                 return
 
-            self.on.slurmctld_peer_configured.emit()
+            # Write files here rather than emitting a custom event as slurm.conf must be in place
+            # on all peers before the get_activate_instance() call below can succeed.
+            self._charm._slurmctld.config.dump(cluster_info["slurm_conf"])
+            if gres_conf := cluster_info.get("gres_conf"):
+                self._charm._slurmctld.gres.dump(gres_conf)
+            self._charm._slurmctld.munge.key.set(cluster_info["auth_key"])
+
+        # Only non-active instances (backups) should sync against the active's StateSaveLocation directory.
+        active = self._ha.get_activate_instance()
+        if self._charm.hostname is not active:
+            self._ha.start_save_state_location_sync(active)
+            self._charm._slurmctld.munge.service.restart()
+            self._charm._slurmctld.service.restart()
+            self._charm._check_status()
 
     def _property_get(self, property_name) -> Optional[str]:
         """Return the property from app relation data."""

@@ -66,7 +66,7 @@ class HASlurmctld(Object):
         # Program executed by slurmctld when a HA backup instance takes over from the primary
         primary_on = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["SlurmctldPrimaryOnProg"])
         primary_on.parent.mkdir(parents=True, exist_ok=True)
-        exec_cmd = f"/usr/bin/juju-exec JUJU_DISPATCH_PATH=hooks/failover {self._charm.charm_dir}/dispatch"
+        exec_cmd = f"/usr/bin/juju-exec JUJU_DISPATCH_PATH=hooks/slurmctld_failover {self._charm.charm_dir}/dispatch"
         primary_on.write_text(
             textwrap.dedent(
                 f"""\
@@ -90,7 +90,7 @@ class HASlurmctld(Object):
         Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
         systemd.daemon_reload()
 
-    def start_backup(self, active_host):
+    def start_save_state_location_sync(self, active_host):
         """Start this backup synchronizing its StateSaveLocation with that of the given active controller."""
         # Stop any existing sync operations in case of failover.
         self._stop_sync()
@@ -140,7 +140,7 @@ class HASlurmctld(Object):
         #       "mode": "backup2"
         #     }
         #   ],
-        ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
+        ping_output = json.loads(self._charm._slurmctld.scontrol("ping", "--json"))
         logger.debug("scontrol ping output: %s", ping_output)
 
         # Slurm fails over to controllers in order. Active instance is the first that is "UP".
