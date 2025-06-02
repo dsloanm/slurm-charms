@@ -8,5 +8,6 @@ dependencies = ["ops", "slurmutils", "influxdb", "netifaces-plus", "hpc-libs", "
 libraries = [
     "grafana-agent.cos_agent",
     "operator-libs-linux.apt",
+    "operator-libs-linux.snap",
     "operator-libs-linux.systemd",
 ]

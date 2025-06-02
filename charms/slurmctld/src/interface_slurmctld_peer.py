@@ -6,6 +6,7 @@
 import json
 import logging
 import secrets
+import subprocess
 from typing import Optional
 
 from constants import CLUSTER_NAME_PREFIX
@@ -104,6 +105,19 @@ class SlurmctldPeer(Object):
             event.defer()
             return
 
+        # Leader puts the joining unit's MicroCeph join token into the peer relation.
+        # Peer defers in install hook until its token is added.
+        if self._charm.unit.is_leader():
+            try:
+                token = subprocess.check_output(["microceph", "cluster", "add", hostname])
+            except subprocess.CalledProcessError as e:
+                logger.error("Error getting microceph join token for %s: %s", hostname, e.output)
+                event.defer()
+                return
+
+            self._relation.data[self.model.app][hostname+"-token"] = token.decode("utf-8").strip().rstrip("\n")
+            logger.debug("set model relation data[%s] = %s", hostname+"-token", token.decode("utf-8").strip().rstrip("\n"))
+
         self._ha.add_controller(hostname)
 
         if self._charm.unit.is_leader():
@@ -122,6 +136,13 @@ class SlurmctldPeer(Object):
         # Peers (non-leaders) get their config data here from the application peer relation, as set by the leader.
         if not self._charm.unit.is_leader():
             # TODO clean up this series of checks - replace with a try/except?
+            if "cluster_info" not in self._relation.data[self.model.app]:
+                logger.debug(
+                    "leader yet to add cluster info to peer relation. deferring event"
+                )
+                event.defer()
+                return
+
             cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
 
             if "slurm_conf" not in cluster_info:

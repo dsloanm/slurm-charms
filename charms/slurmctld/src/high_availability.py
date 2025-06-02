@@ -71,7 +71,7 @@ class HASlurmctld(Object):
             textwrap.dedent(
                 f"""\
                 #!/bin/bash
-                /usr/bin/sudo {exec_cmd}
+                #/usr/bin/sudo {exec_cmd}
                 """
             )
         )
@@ -96,10 +96,10 @@ class HASlurmctld(Object):
         self._stop_sync()
 
         # All backups mount the active instances's state save location then periodically sync with their own state save location
-        Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
-        Path("/etc/auto.checkpoint").write_text(
-            f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}-active -ro,soft,retrans=1,retry=0 {active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}"
-        )
+        #Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
+        #Path("/etc/auto.checkpoint").write_text(
+        #    f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}-active -ro,soft,retrans=1,retry=0 {active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}"
+        #)
 
         self._start_sync()
 
@@ -166,8 +166,8 @@ class HASlurmctld(Object):
         """Start AutoFS mount of active controller's checkpoints directory and begin synchronization to local directory."""
         try:
             systemd.service_reload("autofs", restart_on_failure=True)
-            systemd.service_enable("checkpoint-sync.timer")
-            systemd.service_start("checkpoint-sync.timer")
+            #systemd.service_enable("checkpoint-sync.timer")
+            #systemd.service_start("checkpoint-sync.timer")
         except systemd.SystemdError:
             logger.exception("failed to set up checkpoint synchronization")
             # TODO: raise exception

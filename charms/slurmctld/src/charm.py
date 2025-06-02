@@ -6,7 +6,9 @@
 
 import json
 import logging
+from pathlib import Path
 import shlex
+import shutil
 import subprocess
 from typing import Any, Dict, List, Optional, Union
 
@@ -51,6 +53,7 @@ from ops import (
 from slurmutils.models import AcctGatherConfig, CgroupConfig, GRESConfig, GRESNode, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
+import charms.operator_libs_linux.v2.snap as snap
 
 logger = logging.getLogger()
 
@@ -140,6 +143,84 @@ class SlurmctldCharm(CharmBase):
             logger.error(e.message)
             event.defer()
 
+        # Set up Microceph cluster for StateSaveLocation HA support
+        self.unit.status = WaitingStatus("installing microceph")
+        try:
+            snap.add("microceph")
+        except snap.SnapError as e:
+            logger.error("An exception occurred when installing snaps. Reason: %s" % e.message)
+
+        if self.unit.is_leader():
+            ceph_setup = """microceph cluster bootstrap
+microceph disk add loop,1G,1
+ceph osd pool create cephfs_meta
+ceph osd pool create cephfs_data
+ceph fs new newFs cephfs_meta cephfs_data
+ceph osd pool set cephfs_data size 3
+ceph osd pool set cephfs_meta size 3
+ceph osd pool set cephfs_data min_size 1
+ceph osd pool set cephfs_meta min_size 1
+apt-get install ceph-common -y
+ln -s /var/snap/microceph/current/conf/ceph.keyring /etc/ceph/ceph.keyring
+ln -s /var/snap/microceph/current/conf/ceph.conf /etc/ceph/ceph.conf
+mkdir /mnt/cephfs
+mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
+
+            for line in ceph_setup.splitlines():
+                try:
+                    subprocess.check_output(line.split())
+                except subprocess.CalledProcessError as e:
+                    logger.error("Error setting up microceph: %s" % e.output)
+                    event.defer()
+                    return
+
+            # Move StateSaveLocation to CephFS mount
+            shutil.move(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"], "/mnt/cephfs/")
+            target = Path("/mnt/cephfs/checkpoint")
+            target.chmod(0o755)
+            shutil.chown(target, "slurm", "slurm")
+
+        else:
+            # Peers
+            if not self._slurmctld_peer._relation:
+                logger.debug("yet to form peer relation. deferring event")
+                event.defer()
+                return
+
+            if not (mytoken := self._slurmctld_peer._relation.data[self.model.app].get(self.hostname+"-token")):
+                logger.debug("leader yet to add join token to databag. deferring event")
+                event.defer()
+                return
+
+            try:
+                token = subprocess.check_output(["microceph", "cluster", "join", mytoken])
+            except subprocess.CalledProcessError as e:
+                logger.error("Error joining microceph cluster: %s" % e.output)
+                event.defer()
+                return
+
+            # Peer sets up CephFS mount
+            ceph_setup = """microceph disk add loop,1G,1
+apt-get install ceph-common -y
+ln -s /var/snap/microceph/current/conf/ceph.keyring /etc/ceph/ceph.keyring
+ln -s /var/snap/microceph/current/conf/ceph.conf /etc/ceph/ceph.conf
+mkdir /mnt/cephfs
+mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
+            for line in ceph_setup.splitlines():
+                try:
+                    subprocess.check_output(line.split())
+                except subprocess.CalledProcessError as e:
+                    logger.error("Error setting up microceph: %s" % e.output)
+                    event.defer()
+                    return
+
+            # Remove unneeded StateSaveLocation directory
+            if Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]).exists():
+                shutil.rmtree(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+
+        # Replace old StateSaveLocation with a symlink
+        Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]).symlink_to("/mnt/cephfs/checkpoint")
+
     def _on_start(self, event: StartEvent) -> None:
         """Set cluster_name and write slurm.conf.
 
@@ -154,6 +235,10 @@ class SlurmctldCharm(CharmBase):
         try:
             self._slurmctld.munge.service.restart()
             self._slurmctld.service.enable()
+
+            # HACK
+            shutil.chown("/var/lib/slurm/checkpoint/jwt_hs256.key", "slurm", "slurm")
+
             # (Leader's) slurmctld service is started within this function.
             self._on_write_slurm_conf(event)
 
