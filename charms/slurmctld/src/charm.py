@@ -4,10 +4,10 @@
 
 """SlurmctldCharm."""
 
-import json
 import logging
 import shlex
 import subprocess
+import high_availability as ha
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
@@ -16,13 +16,13 @@ from constants import (
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
-from high_availability import HAEvents
 from hpc_libs.is_container import is_container
 from hpc_libs.slurm_ops import SlurmctldManager, SlurmOpsError
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
 from interface_sackd import Sackd
 from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
+    SlurmctldChangedEvent,
     SlurmctldPeer,
 )
 from interface_slurmd import (
@@ -58,8 +58,6 @@ logger = logging.getLogger()
 class SlurmctldCharm(CharmBase):
     """Slurmctld lifecycle events."""
 
-    # TODO: explain why overriding on
-    on = HAEvents()
     _stored = StoredState()
 
     def __init__(self, *args):
@@ -102,6 +100,7 @@ class SlurmctldCharm(CharmBase):
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
             self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
+            self._slurmctld_peer.on.slurmctld_changed: self._on_slurmctld_changed,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -127,15 +126,21 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-diags",
                 "-slurm.collect-limits",
             ]
+            self.unit.set_workload_version(self._slurmctld.version())
+
+            # HA packages are installed even if only a single slurmctld instance is running.
+            # Accounts for cases such as a backup controller being added when the primary is down then the primary coming back online.
+            ha.install()
 
             if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._slurmctld.munge.key.generate()
+                # Non-leader units flag themselves as installed in the later `slurmctld_changed`
+                # event, once they have received key(s) and config data from the leader.
+                self.slurm_installed = True
 
-            self.unit.set_workload_version(self._slurmctld.version())
-            self.slurm_installed = True
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -151,11 +156,21 @@ class SlurmctldCharm(CharmBase):
               first execution of this hook, we log and return on any subsequent start hook
               event executions.
         """
+        if not self.slurm_installed:
+            logger.debug("attempted to start before slurm installed. deferring event")
+            event.defer()
+            return
+
         try:
             self._slurmctld.munge.service.restart()
             self._slurmctld.service.enable()
-            # (Leader's) slurmctld service is started within this function.
-            self._on_write_slurm_conf(event)
+
+            if self.unit.is_leader():
+                # (Leader's) slurmctld service is started within this function.
+                self._on_write_slurm_conf(event)
+            else:
+                self._slurmctld.service.restart()
+                self._check_status()
 
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
@@ -203,10 +218,19 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # gres.conf update not needed - new slurmctld controllers joining does not change gres.conf
+        # Only slurm.conf update needed. New slurmctld controllers joining does not change any other conf file.
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
+
+    def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
+        """Update slurmctld configuration on this peer. Only triggered by non-leader instances when they receive configuration updates from the leader."""
+        self._slurmctld.config.dump(event.slurm_conf)
+        if event.gres_conf:
+            self._slurmctld.gres.dump(event.gres_conf)
+        self._slurmctld.munge.key.set(event.auth_key)
+
+        self.slurm_installed = True
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""

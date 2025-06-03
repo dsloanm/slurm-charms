@@ -28,7 +28,6 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "PlugStackConfig": "/etc/slurm/plugstack.conf.d/plugstack.conf",
     "SelectType": "select/cons_tres",
     "SelectTypeParameters": "CR_CPU_Memory",
-    "SlurmctldPrimaryOnProg": "/usr/local/bin/primary_on.sh",
     "SlurmctldPort": "6817",
     "SlurmdPort": "6818",
     "StateSaveLocation": "/var/lib/slurm/checkpoint",
@@ -42,17 +41,19 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "RebootProgram": "/usr/sbin/reboot --reboot",
 }
 
-CHECKPOINT_AUTOFS_MASTER = "/- /etc/auto.checkpoint --timeout 10"
+CSYNC2_CONF = """group charmedhpc {
+host;
+key /etc/csync2.key;
+include /var/lib/slurm/checkpoint;
+}
+"""
 
 CHECKPOINT_SYNC_SERVICE = """[Unit]
 Description=Slurm checkpoint directory sync
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/rsync --timeout 5 --delete -a /var/lib/slurm/checkpoint-active/ /var/lib/slurm/checkpoint/
-User=slurm
-Group=slurm
-TimeoutStopSec=180
+ExecStart=/usr/sbin/csync2 -xv
 """
 
 CHECKPOINT_SYNC_TIMER = """[Unit]
