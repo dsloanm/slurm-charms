@@ -234,20 +234,17 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
         """Update slurmctld configuration on this peer. Only triggered by non-leader instances when they receive configuration updates from the leader."""
+        controllers = self._slurmctld_peer.controllers.split(",")
+        controllers.remove(self.hostname)
+        if not ha.is_sync_complete(controllers):
+            logger.debug("sync of StateSaveLocation data to this unit yet to complete. deferring event")
+            event.defer()
+            return
+
         self._slurmctld.config.dump(event.slurm_conf)
         if event.gres_conf:
             self._slurmctld.gres.dump(event.gres_conf)
         self._slurmctld.munge.key.set(event.auth_key)
-        # Munge service restart needed to allow detection of primary instance.
-        self._slurmctld.munge.service.restart()
-
-        # Wait until the current active controller has finished pushing StateSaveLocation data to this unit.
-        if self._slurmctld_peer.active_completed_sync():
-            self._slurmctld_peer.acknowledge_sync()
-        else:
-            logger.debug("initial sync of StateSaveLocation data to this unit yet to complete. deferring event")
-            event.defer()
-            return
 
         # Prevents slurmctld service from starting on a non-leader until all files are in place.
         self.slurm_installed = True

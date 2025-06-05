@@ -99,9 +99,6 @@ class SlurmctldPeer(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
-        self._relation.data[self._charm.unit]["completed_initial_syncs"] = self._charm.hostname
-        self._relation.data[self._charm.unit]["is_initial_sync_complete"] = "False"
-        self._relation.data[self._charm.unit]["is_sync_configured"] = "False"
 
         if not self._charm.unit.is_leader():
             return
@@ -141,37 +138,12 @@ class SlurmctldPeer(Object):
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
-        my_unit_data = self._relation.data[self._charm.unit]
 
         # Update high availability configuration.
         ha.stop_sync()
         ha.set_key(cluster_info["ha_key"])
         ha.set_cert(cluster_info["ha_cert"], cluster_info["ha_cert_key"])
         ha.set_controllers(cluster_info["controllers"].split(","))
-        my_unit_data["is_sync_configured"] = "True"
-
-        # Remove hostname from list of completed initial syncs if unit has acknowledged.
-        if event.unit:
-            logger.debug("performing HA sync for triggering unit %s", event.unit)
-            event_unit_data = self._relation.data[event.unit]
-
-            if event_unit_data["is_initial_sync_complete"] == "True":
-                completed = my_unit_data["completed_initial_syncs"].split(",")
-                my_unit_data["completed_initial_syncs"] = ",".join([host for host in completed if host != event_unit_data["hostname"]])
-            # Perform initial synchronization of data if the triggering unit is configured.
-            elif event_unit_data["is_sync_configured"] == "True":
-                try:
-                    # TODO: Can we optimize by having only primary slurmctld instance perform sync?
-                    # No, what if an instance fails partway through a sync?
-                    ha.sync_to(event_unit_data["hostname"])
-                    if event_unit_data["hostname"] not in my_unit_data["completed_initial_syncs"]:
-                        my_unit_data["completed_initial_syncs"] += f",{event_unit_data["hostname"]}"
-                except ha.HAOpsError as e:
-                    logger.warning(f"failed sync of StateSaveLocation to {event_unit_data["hostname"]}. reason: {e}. deferring event")
-                    # TODO: confirm if this will defer forever on a downed unit.
-                    event.defer()
-                    return
-
         ha.start_sync()
 
         # The leader writes out config files into the application peer relation in the main charm code so can skip the rest of this event.
@@ -231,18 +203,6 @@ class SlurmctldPeer(Object):
         # Update list of controllers on other Slurm services
         self._charm._sackd.update_controllers()
         self._charm._slurmd.update_controllers()
-
-    def acknowledge_sync(self):
-        self._relation.data[self._charm.unit]["is_initial_sync_complete"] = "True"
-
-    def active_completed_sync(self):
-        """Return True if the active slurmctld instance has completed its initial synchronization of StateSaveLocation data to the current unit. False otherwise."""
-        active_hostname = ha.get_activate_instance()
-        for unit in self._relation.units:
-            if self._relation.data[unit]["hostname"] == active_hostname:
-                return self._charm.hostname in self._relation.data[unit]["completed_initial_syncs"]
-
-        return False
 
     @property
     def auth_key(self) -> Optional[str]:

@@ -3,12 +3,10 @@
 
 """Slurmctld high availability (HA) features."""
 
-import json
 import logging
 import socket
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from constants import (
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
@@ -48,15 +46,6 @@ def install() -> None:
     Path("/etc/systemd/system/checkpoint-sync.service").write_text(CHECKPOINT_SYNC_SERVICE)
     Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
     systemd.daemon_reload()
-
-
-def sync_to(hostname) -> None:
-    """Perform an explicit synchronization of StateSaveLocation files to the given hostname."""
-    logging.debug(f"csync2 synchronizing files {list(Path("/var/lib/slurm/checkpoint").iterdir())}")
-    try:
-        subprocess.check_output(["/usr/sbin/csync2", "-xv", "-P", hostname])
-    except subprocess.CalledProcessError as e:
-        raise HAOpsError(f"failed to perform initial StateSaveLocation sync to {hostname}. reason: {e}")
 
 
 def start_sync() -> None:
@@ -112,57 +101,32 @@ def set_controllers(hostnames, cfg_file="/etc/csync2.cfg") -> None:
         raise HAOpsError(f"failed to mark StateSaveLocation as dirty in csync2 database. reason: {e}")
 
 
-def _scontrol_ping():
-    # Example snippet of ping output:
-    #   "pings": [
-    #     {
-    #       "hostname": "juju-829e74-84",
-    #       "pinged": "DOWN",
-    #       "latency": 1850,
-    #       "mode": "primary"
-    #     },
-    #     {
-    #       "hostname": "juju-829e74-85",
-    #       "pinged": "UP",
-    #       "latency": 1278,
-    #       "mode": "backup1"
-    #     },
-    #     {
-    #       "hostname": "juju-829e74-86",
-    #       "pinged": "UP",
-    #       "latency": 984,
-    #       "mode": "backup2"
-    #     }
-    #   ],
-    try:
-        ping_output = json.loads(subprocess.check_output(["/usr/bin/scontrol", "ping", "--json"]))
-    except subprocess.CalledProcessError as e:
-        raise HAOpsError(f"failed to query active instance. reason: {e}")
-    logger.debug("scontrol ping output: %s", ping_output)
+def is_sync_complete(hostnames) -> bool:
+    """Return True if the StateSaveLocation data on this host is synchronized with all other hosts. False if there are pending changes on other hosts.
 
-    return ping_output
+    Ignores hosts that are unreachable.
+    """
+    # `csync2 -T` returns:
+    #   * 2 if all hosts are in sync
+    #   * 0 if any host is out of sync
+    #   * 1 if there's an error
+    #
+    p = subprocess.run(["/usr/sbin/csync2", "-T"])
+    if p.returncode == 2:
+        return True
+    if p.returncode == 0:
+        return False
 
+    # A code of 1 may indicate we are synchronized, e.g. if a single host is down but we are synchronized against the rest.
+    # Check each hostname one at a time.
+    my_hostname = socket.gethostname()
+    for peer in hostnames:
+        p = subprocess.run(["/usr/sbin/csync2", "-T", my_hostname, peer])
+        if p.returncode == 0:
+            return False
 
-def get_activate_instance() -> Optional[str]:
-    """Return the hostname of the active controller instance. Return None if no controllers are active."""
-    # Slurm fails over to controllers in order. Active instance is the first that is "UP".
-    ping_output = _scontrol_ping()
-    for host in ping_output["pings"]:
-        if host["pinged"] == "UP":
-            return host["hostname"]
-
-    return None
-
-
-def get_down_instances() -> list:
-    """Return the hostnames of any controller instances that are unresponsive."""
-    down = []
-    ping_output = _scontrol_ping()
-    for host in ping_output["pings"]:
-        if host["pinged"] == "DOWN":
-            down.append(host["hostname"])
-
-    return down
+    # No hosts were found to be out of sync.
+    return True
 
 
 def generate_key(key_file="/etc/csync2.key") -> str:
