@@ -156,6 +156,14 @@ class SlurmctldCharm(CharmBase):
               first execution of this hook, we log and return on any subsequent start hook
               event executions.
         """
+        # TODO: determine if there's a race condition here. slurmctld service should not start until any StateSaveLocation sync is complete.
+        # e.g. In an HA scenario, if a primary unit has died, been recovered and then rebooted, it should not take over as primary again until
+        # new StateSaveLocation data is synced from the backup that was running in the meantime.
+        # Add a ha.wait_for_completion() that does some check to determine if a sync is in progress before continuing:
+        #   "`ps` for csync2? "csync2 -i -l" runs if there's a current incoming sync". Still timing issues though - what if it hasn't started before we check? What if it's already finished?
+        #   Check inetd logs for a startup and completion? What if there's been no changes to the files and the backup doesn't try a push? Check logs with a timeout?
+        #   Wait until there's a file newer than boot time? No, then we'd start on partial sync.
+
         if not self.slurm_installed:
             logger.debug("attempted to start before slurm installed. deferring event")
             event.defer()
@@ -163,10 +171,11 @@ class SlurmctldCharm(CharmBase):
 
         try:
             self._slurmctld.munge.service.restart()
-            self._slurmctld.service.enable()
+            # slurmctld must not automatically start on boot to avoid starting before conf files and StateSaveLocation data are synchronized in an HA scenario.
+            self._slurmctld.service.disable()
 
             if self.unit.is_leader():
-                # (Leader's) slurmctld service is started within this function.
+                # Leader's slurmctld service is started within this function.
                 self._on_write_slurm_conf(event)
             else:
                 self._slurmctld.service.restart()
@@ -229,7 +238,18 @@ class SlurmctldCharm(CharmBase):
         if event.gres_conf:
             self._slurmctld.gres.dump(event.gres_conf)
         self._slurmctld.munge.key.set(event.auth_key)
+        # Munge service restart needed to allow detection of primary instance.
+        self._slurmctld.munge.service.restart()
 
+        # Wait until the current active controller has finished pushing StateSaveLocation data to this unit.
+        if self._slurmctld_peer.active_completed_sync():
+            self._slurmctld_peer.acknowledge_sync()
+        else:
+            logger.debug("initial sync of StateSaveLocation data to this unit yet to complete. deferring event")
+            event.defer()
+            return
+
+        # Prevents slurmctld service from starting on a non-leader until all files are in place.
         self.slurm_installed = True
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:

@@ -45,6 +45,7 @@ CSYNC2_CONF = """group charmedhpc {
 host;
 key /etc/csync2.key;
 include /var/lib/slurm/checkpoint;
+auto younger;
 }
 """
 
