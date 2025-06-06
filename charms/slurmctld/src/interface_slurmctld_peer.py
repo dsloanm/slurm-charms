@@ -6,11 +6,10 @@
 import json
 import logging
 import secrets
-import subprocess
+import high_availability as ha
 from typing import Optional
 
 from constants import CLUSTER_NAME_PREFIX
-from high_availability import HASlurmctld
 from ops import (
     EventBase,
     EventSource,
@@ -38,10 +37,35 @@ class SlurmctldAvailableEvent(EventBase):
     """Emitted when a controller observes another controller instance."""
 
 
+class SlurmctldChangedEvent(EventBase):
+    """Emitted when a non-leader controller receives a configuration update from the leader."""
+
+    def __init__(self, handle, auth_key, slurm_conf, gres_conf=None):
+        super().__init__(handle)
+        self.auth_key = auth_key
+        self.slurm_conf = slurm_conf
+        self.gres_conf = gres_conf
+
+    def snapshot(self):
+        """Snapshot the event data."""
+        return {
+            "auth_key": self.auth_key,
+            "slurm_conf": self.slurm_conf,
+            "gres_conf": self.gres_conf,
+        }
+
+    def restore(self, snapshot):
+        """Restore the snapshot of the event data."""
+        self.auth_key = snapshot.get("auth_key")
+        self.slurm_conf = snapshot.get("slurm_conf")
+        self.gres_conf = snapshot.get("gres_conf")
+
+
 class Events(ObjectEvents):
     """Interface events."""
 
     slurmctld_available = EventSource(SlurmctldAvailableEvent)
+    slurmctld_changed = EventSource(SlurmctldChangedEvent)
 
 
 class SlurmctldPeer(Object):
@@ -54,7 +78,6 @@ class SlurmctldPeer(Object):
         super().__init__(charm, relation_name)
         self._charm = charm
         self._relation_name = relation_name
-        self._ha = HASlurmctld(charm)
 
         self.framework.observe(
             self._charm.on[self._relation_name].relation_created,
@@ -76,10 +99,6 @@ class SlurmctldPeer(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
-
-        # HA packages and servers are installed even if only a single slurmctld instance is running.
-        # Accounts for cases such as a backup controller being added when the primary is down then the primary coming back online.
-        self._ha.install()
 
         if not self._charm.unit.is_leader():
             return
@@ -105,74 +124,41 @@ class SlurmctldPeer(Object):
             event.defer()
             return
 
-        # Leader puts the joining unit's MicroCeph join token into the peer relation.
-        # Peer defers in install hook until its token is added.
-        if self._charm.unit.is_leader():
-            try:
-                token = subprocess.check_output(["microceph", "cluster", "add", hostname])
-            except subprocess.CalledProcessError as e:
-                logger.error("Error getting microceph join token for %s: %s", hostname, e.output)
-                event.defer()
-                return
+        if not self._charm.unit.is_leader():
+            return
 
-            self._relation.data[self.model.app][hostname+"-token"] = token.decode("utf-8").strip().rstrip("\n")
-            logger.debug("set model relation data[%s] = %s", hostname+"-token", token.decode("utf-8").strip().rstrip("\n"))
+        # Provide a token to the new peer for joining the HA cluster.
+        if hostname+"-token" not in self._relation.data[self.model.app]:
+            token = ha.add(hostname)
+            self._relation.data[self.model.app][hostname+"-token"] = token
 
-        self._ha.add_controller(hostname)
-
-        if self._charm.unit.is_leader():
-            # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
-            # Appending here ensures this unit will be the last backup.
-            self.add_controller(hostname)
-            self.on.slurmctld_available.emit()
+        # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
+        # Appending here ensures this unit will be the last backup.
+        self.add_controller(hostname)
+        self.on.slurmctld_available.emit()
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-        # Clear any existing failover flag
-        if "failover" in self._relation.data[self._charm.unit]:
-            del self._relation.data[self._charm.unit]["failover"]
+        # The leader is the producer of relation changes. It does not need to consume any relation-changed events.
+        if self._charm.unit.is_leader():
+            return
 
-        # Charm leader is not necessarily the active slurmctld instance in an HA setup.
-        # The leader gathers and writes out config files into the application peer relation in the main charm code.
-        # Peers (non-leaders) get their config data here from the application peer relation, as set by the leader.
-        if not self._charm.unit.is_leader():
-            # TODO clean up this series of checks - replace with a try/except?
-            if "cluster_info" not in self._relation.data[self.model.app]:
-                logger.debug(
-                    "leader yet to add cluster info to peer relation. deferring event"
-                )
-                event.defer()
-                return
+        if (token := self._relation.data[self.model.app].get(f"{self._charm.hostname}-token")) and not self._charm._stored.joined_ceph_cluster:
+            ha.join(token)
+            ha.add_disk()
+            ha.configure_mount()
+            ha.symlink()
+            self._charm._stored.joined_ceph_cluster = True
 
-            cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+        if (cluster_info := self._relation.data[self.model.app].get("cluster_info")):
+            cluster_info = json.loads(cluster_info)
 
-            if "slurm_conf" not in cluster_info:
-                logger.debug(
-                    "leader yet to add slurm configuration to peer relation. deferring event"
-                )
-                event.defer()
-                return
+            if "slurm_conf" in cluster_info:
+                slurm_conf = SlurmConfig.from_str(cluster_info["slurm_conf"])
+                if self._charm.hostname in slurm_conf.slurmctld_host:
+                    self.on.slurmctld_changed.emit(auth_key=cluster_info["auth_key"],
+                                        slurm_conf=cluster_info["slurm_conf"],
+                                        gres_conf=cluster_info.get("gres_conf"))
 
-            slurm_conf = SlurmConfig.from_str(cluster_info["slurm_conf"])
-
-            if self._charm.hostname not in slurm_conf.slurmctld_host:
-                logger.debug("leader yet to add this backup host to slurm config. deferring event")
-                event.defer()
-                return
-
-            # Write files here rather than emitting a custom event as slurm.conf must be in place
-            # on all peers before the get_activate_instance() call below can succeed.
-            self._charm._slurmctld.config.dump(cluster_info["slurm_conf"])
-            if gres_conf := cluster_info.get("gres_conf"):
-                self._charm._slurmctld.gres.dump(gres_conf)
-            self._charm._slurmctld.munge.key.set(cluster_info["auth_key"])
-
-        # Only non-active instances (backups) should sync against the active's StateSaveLocation directory.
-        active = self._ha.get_activate_instance()
-        if self._charm.hostname is not active:
-            self._ha.start_save_state_location_sync(active)
-            self._charm._slurmctld.munge.service.restart()
-            self._charm._slurmctld.service.restart()
-            self._charm._check_status()
 
     def _property_get(self, property_name) -> Optional[str]:
         """Return the property from app relation data."""

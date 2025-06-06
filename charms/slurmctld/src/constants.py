@@ -28,7 +28,6 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "PlugStackConfig": "/etc/slurm/plugstack.conf.d/plugstack.conf",
     "SelectType": "select/cons_tres",
     "SelectTypeParameters": "CR_CPU_Memory",
-    "SlurmctldPrimaryOnProg": "/usr/local/bin/primary_on.sh",
     "SlurmctldPort": "6817",
     "SlurmdPort": "6818",
     "StateSaveLocation": "/var/lib/slurm/checkpoint",
@@ -41,27 +40,3 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "SlurmdUser": "root",
     "RebootProgram": "/usr/sbin/reboot --reboot",
 }
-
-CHECKPOINT_AUTOFS_MASTER = "/- /etc/auto.checkpoint --timeout 10"
-
-CHECKPOINT_SYNC_SERVICE = """[Unit]
-Description=Slurm checkpoint directory sync
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/rsync --timeout 5 --delete -a /var/lib/slurm/checkpoint-active/ /var/lib/slurm/checkpoint/
-User=slurm
-Group=slurm
-TimeoutStopSec=180
-"""
-
-CHECKPOINT_SYNC_TIMER = """[Unit]
-Description=Run Slurm checkpoint directory sync periodically
-
-[Timer]
-OnBootSec=1sec
-OnUnitActiveSec=5sec
-
-[Install]
-WantedBy=timers.target
-"""

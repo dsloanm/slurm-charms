@@ -27,7 +27,6 @@ from slurmutils import calculate_rs
 from slurmutils.models.option import NodeOptionSet, PartitionOptionSet
 from utils import gpu, machine, nhc, rdma, service
 
-import charms.operator_libs_linux.v2.snap as snap
 from charms.operator_libs_linux.v0.juju_systemd_notices import (  # type: ignore[import-untyped]
     ServiceStartedEvent,
     ServiceStoppedEvent,

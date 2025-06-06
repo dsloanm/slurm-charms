@@ -4,12 +4,10 @@
 
 """SlurmctldCharm."""
 
-import json
 import logging
-from pathlib import Path
 import shlex
-import shutil
 import subprocess
+import high_availability as ha
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
@@ -18,13 +16,13 @@ from constants import (
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
-from high_availability import HAEvents
 from hpc_libs.is_container import is_container
 from hpc_libs.slurm_ops import SlurmctldManager, SlurmOpsError
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
 from interface_sackd import Sackd
 from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
+    SlurmctldChangedEvent,
     SlurmctldPeer,
 )
 from interface_slurmd import (
@@ -53,7 +51,6 @@ from ops import (
 from slurmutils.models import AcctGatherConfig, CgroupConfig, GRESConfig, GRESNode, SlurmConfig
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
-import charms.operator_libs_linux.v2.snap as snap
 
 logger = logging.getLogger()
 
@@ -61,8 +58,6 @@ logger = logging.getLogger()
 class SlurmctldCharm(CharmBase):
     """Slurmctld lifecycle events."""
 
-    # TODO: explain why overriding on
-    on = HAEvents()
     _stored = StoredState()
 
     def __init__(self, *args):
@@ -82,6 +77,7 @@ class SlurmctldCharm(CharmBase):
             user_supplied_slurm_conf_params=str(),
             acct_gather_params={},
             job_profiling_slurm_conf={},
+            joined_ceph_cluster=False,
         )
 
         self._slurmctld = SlurmctldManager(snap=False)
@@ -105,6 +101,7 @@ class SlurmctldCharm(CharmBase):
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
             self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
+            self._slurmctld_peer.on.slurmctld_changed: self._on_slurmctld_changed,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -123,6 +120,20 @@ class SlurmctldCharm(CharmBase):
 
     def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
+        # Set up Microceph cluster for StateSaveLocation HA support
+        self.unit.status = WaitingStatus("installing microceph")
+        try:
+            ha.install()
+
+            if self.unit.is_leader():
+                ha.bootstrap()
+                ha.configure_mount()
+                self._stored.joined_ceph_cluster = True
+        except ha.HAOpsError as e:
+            logger.error(e.message)
+            event.defer()
+            return
+
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
             self._slurmctld.install()
@@ -132,94 +143,24 @@ class SlurmctldCharm(CharmBase):
             ]
 
             if self.unit.is_leader():
+                # Relocate the StateSaveLocation to remote storage before we start writing to it.
+                ha.remake_checkpoint()
+                ha.symlink()
+
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
                 self._slurmctld.munge.key.generate()
 
+                # Non-leader units flag themselves as installed in the `slurmctld_changed` event,
+                # after they have received config data from the leader.
+                self.slurm_installed = True
+
             self.unit.set_workload_version(self._slurmctld.version())
-            self.slurm_installed = True
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
-
-        # Set up Microceph cluster for StateSaveLocation HA support
-        self.unit.status = WaitingStatus("installing microceph")
-        try:
-            snap.add("microceph")
-        except snap.SnapError as e:
-            logger.error("An exception occurred when installing snaps. Reason: %s" % e.message)
-
-        if self.unit.is_leader():
-            ceph_setup = """microceph cluster bootstrap
-microceph disk add loop,1G,1
-ceph osd pool create cephfs_meta
-ceph osd pool create cephfs_data
-ceph fs new newFs cephfs_meta cephfs_data
-ceph osd pool set cephfs_data size 3
-ceph osd pool set cephfs_meta size 3
-ceph osd pool set cephfs_data min_size 1
-ceph osd pool set cephfs_meta min_size 1
-apt-get install ceph-common -y
-ln -s /var/snap/microceph/current/conf/ceph.keyring /etc/ceph/ceph.keyring
-ln -s /var/snap/microceph/current/conf/ceph.conf /etc/ceph/ceph.conf
-mkdir /mnt/cephfs
-mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
-
-            for line in ceph_setup.splitlines():
-                try:
-                    subprocess.check_output(line.split())
-                except subprocess.CalledProcessError as e:
-                    logger.error("Error setting up microceph: %s" % e.output)
-                    event.defer()
-                    return
-
-            # Move StateSaveLocation to CephFS mount
-            shutil.move(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"], "/mnt/cephfs/")
-            target = Path("/mnt/cephfs/checkpoint")
-            target.chmod(0o755)
-            shutil.chown(target, "slurm", "slurm")
-
-        else:
-            # Peers
-            if not self._slurmctld_peer._relation:
-                logger.debug("yet to form peer relation. deferring event")
-                event.defer()
-                return
-
-            if not (mytoken := self._slurmctld_peer._relation.data[self.model.app].get(self.hostname+"-token")):
-                logger.debug("leader yet to add join token to databag. deferring event")
-                event.defer()
-                return
-
-            try:
-                token = subprocess.check_output(["microceph", "cluster", "join", mytoken])
-            except subprocess.CalledProcessError as e:
-                logger.error("Error joining microceph cluster: %s" % e.output)
-                event.defer()
-                return
-
-            # Peer sets up CephFS mount
-            ceph_setup = """microceph disk add loop,1G,1
-apt-get install ceph-common -y
-ln -s /var/snap/microceph/current/conf/ceph.keyring /etc/ceph/ceph.keyring
-ln -s /var/snap/microceph/current/conf/ceph.conf /etc/ceph/ceph.conf
-mkdir /mnt/cephfs
-mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
-            for line in ceph_setup.splitlines():
-                try:
-                    subprocess.check_output(line.split())
-                except subprocess.CalledProcessError as e:
-                    logger.error("Error setting up microceph: %s" % e.output)
-                    event.defer()
-                    return
-
-            # Remove unneeded StateSaveLocation directory
-            if Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]).exists():
-                shutil.rmtree(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-
-        # Replace old StateSaveLocation with a symlink
-        Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"]).symlink_to("/mnt/cephfs/checkpoint")
+            return
 
     def _on_start(self, event: StartEvent) -> None:
         """Set cluster_name and write slurm.conf.
@@ -232,15 +173,26 @@ mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
               first execution of this hook, we log and return on any subsequent start hook
               event executions.
         """
+        if not self._stored.slurm_installed:
+            logger.debug("attempted to start before slurm installed. deferring event")
+            event.defer()
+            return
+
+        if not self._stored.joined_ceph_cluster:
+            logger.debug("attempted to start before part of the Ceph cluster. deferring event")
+            event.defer()
+            return
+
         try:
             self._slurmctld.munge.service.restart()
             self._slurmctld.service.enable()
 
-            # HACK
-            shutil.chown("/var/lib/slurm/checkpoint/jwt_hs256.key", "slurm", "slurm")
-
-            # (Leader's) slurmctld service is started within this function.
-            self._on_write_slurm_conf(event)
+            if self.unit.is_leader():
+                # Leader's slurmctld service is started within this function.
+                self._on_write_slurm_conf(event)
+            else:
+                self._slurmctld.service.restart()
+                self._check_status()
 
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
@@ -288,10 +240,20 @@ mount -t ceph :/ /mnt/cephfs/ -o name=admin,fs=newFs"""
 
     def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # gres.conf update not needed - new slurmctld controllers joining does not change gres.conf
+        # Only slurm.conf update needed. New slurmctld controllers joining does not change any other conf file.
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
+
+    def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
+        """Update slurmctld configuration on this peer. Observed only by non-leader instances when they receive configuration updates from the leader."""
+        self._slurmctld.config.dump(event.slurm_conf)
+        if event.gres_conf:
+            self._slurmctld.gres.dump(event.gres_conf)
+        self._slurmctld.munge.key.set(event.auth_key)
+
+        # Prevents slurmctld service from starting on a non-leader until all files are in place.
+        self.slurm_installed = True
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""

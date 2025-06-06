@@ -3,40 +3,19 @@
 
 """Slurmctld high availability (HA) features."""
 
-import json
 import logging
+import shutil
 import subprocess
-import textwrap
+import time
 from pathlib import Path
-from typing import Optional
 
-from constants import (
-    CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
-    CHECKPOINT_AUTOFS_MASTER,
-    CHECKPOINT_SYNC_SERVICE,
-    CHECKPOINT_SYNC_TIMER,
-)
-from ops import (
-    CharmEvents,
-    EventBase,
-    EventSource,
-    Object,
-)
+from constants import CHARM_MAINTAINED_SLURM_CONF_PARAMETERS
 
 import charms.operator_libs_linux.v0.apt as apt
+import charms.operator_libs_linux.v2.snap as snap
 import charms.operator_libs_linux.v1.systemd as systemd
 
 logger = logging.getLogger()
-
-
-class SlurmctldFailoverEvent(EventBase):
-    """Emitted when a failover to this backup controller occurs."""
-
-
-class HAEvents(CharmEvents):
-    """High Availability events."""
-
-    slurmctld_failover = EventSource(SlurmctldFailoverEvent)
 
 
 class HAOpsError(Exception):
@@ -48,146 +27,151 @@ class HAOpsError(Exception):
         return self.args[0]
 
 
-class HASlurmctld(Object):
-    """Ensapsulate slurmctld high availability operations."""
+def install() -> None:
+    """Install software and services necessary for a slurmctld high availability configuration."""
+    try:
+        # TODO: hold version?
+        snap.add("microceph")
+    except snap.SnapError as e:
+        raise HAOpsError(f"failed to install `microceph` snap. reason: {e}")
 
-    def __init__(self, charm):
-        super().__init__(charm, "high-availability-slurmctld")
-        self._charm = charm
-        self.framework.observe(self._charm.on.slurmctld_failover, self._on_failover)
+    pkgs = ["autofs", "ceph-common"]
+    try:
+        apt.add_package(pkgs)
+    except (apt.PackageNotFoundError, apt.PackageError) as e:
+        raise HAOpsError(f"failed to install {pkgs} packages. reason: {e}")
 
-    def install(self) -> None:
-        """Install software and services necessary for a slurmctld high availability configuration."""
-        # HA mount point. NFS share of active slurmctld instance checkpoint directory.
-        Path(f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}-active").mkdir(
-            parents=True, exist_ok=True
-        )
+    logger.debug("setting up Ceph keyring and configuration file")
 
-        # Program executed by slurmctld when a HA backup instance takes over from the primary
-        primary_on = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["SlurmctldPrimaryOnProg"])
-        primary_on.parent.mkdir(parents=True, exist_ok=True)
-        exec_cmd = f"/usr/bin/juju-exec JUJU_DISPATCH_PATH=hooks/slurmctld_failover {self._charm.charm_dir}/dispatch"
-        primary_on.write_text(
-            textwrap.dedent(
-                f"""\
-                #!/bin/bash
-                #/usr/bin/sudo {exec_cmd}
-                """
-            )
-        )
-        primary_on.chmod(0o755)
-        # HACK FIXME: juju-exec needs to run as root but slurmctld runs as the slurm user. Give slurm user sudo access(!) here.
-        Path("/etc/sudoers.d/slurm").write_text(f"slurm ALL=(root) NOPASSWD: {exec_cmd}")
+    links = [
+        ("/etc/ceph/ceph.keyring", "/var/snap/microceph/current/conf/ceph.keyring"),
+        ("/etc/ceph/ceph.conf", "/var/snap/microceph/current/conf/ceph.conf")
+    ]
+    for link, target in links:
+        link_path = Path(link)
+        target_path = Path(target)
 
-        pkgs = ["nfs-kernel-server", "autofs"]
+        if link_path.is_symlink():
+            logger.info("%s is already a symlink. Skipping creation.", link_path)
+            continue
+
+        link_path.symlink_to(target_path)
+
+
+def bootstrap() -> None:
+    """Bootstrap a Ceph cluster and CephFS file system for holding StateSaveLocation contents."""
+    # TODO: reconsider disk size and pool size/min_size constants.
+    logger.debug("bootstrapping new Ceph cluster")
+    ceph_setup = [
+        "microceph cluster bootstrap",
+        "microceph disk add loop,2G,1",
+        "ceph osd pool create cephfs_meta",
+        "ceph osd pool create cephfs_data",
+        "ceph fs new checkpointFs cephfs_meta cephfs_data",
+        "ceph osd pool set cephfs_data size 3",
+        "ceph osd pool set cephfs_meta size 3",
+        "ceph osd pool set cephfs_data min_size 1",
+        "ceph osd pool set cephfs_meta min_size 1"
+    ]
+
+    for cmd in ceph_setup:
         try:
-            apt.add_package(pkgs)
-        except (apt.PackageNotFoundError, apt.PackageError) as e:
-            raise HAOpsError(f"failed to install packages: {pkgs}. reason: {e}")
-
-        # Don't start these services yet. All controllers install them but only backups should have them running.
-        Path("/etc/systemd/system/checkpoint-sync.service").write_text(CHECKPOINT_SYNC_SERVICE)
-        Path("/etc/systemd/system/checkpoint-sync.timer").write_text(CHECKPOINT_SYNC_TIMER)
-        systemd.daemon_reload()
-
-    def start_save_state_location_sync(self, active_host):
-        """Start this backup synchronizing its StateSaveLocation with that of the given active controller."""
-        # Stop any existing sync operations in case of failover.
-        self._stop_sync()
-
-        # All backups mount the active instances's state save location then periodically sync with their own state save location
-        #Path("/etc/auto.master.d/checkpoint.autofs").write_text(CHECKPOINT_AUTOFS_MASTER)
-        #Path("/etc/auto.checkpoint").write_text(
-        #    f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}-active -ro,soft,retrans=1,retry=0 {active_host}:{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}"
-        #)
-
-        self._start_sync()
-
-    def add_controller(self, hostname) -> None:
-        """Export the Slurm StateSaveLocation to the given hostname."""
-        # TODO: write an unexport function for departing units that deletes their file from /etc/exports.d and does "exportfs -a -u"
-        export = Path(f"/etc/exports.d/{hostname}-checkpoint.exports")
-        export.parent.mkdir(parents=True, exist_ok=True)
-        export.write_text(
-            f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']} {hostname}(ro,no_subtree_check)\n"
-        )
-
-        try:
-            subprocess.check_call(["/usr/sbin/exportfs", "-a", "-r"])
+            subprocess.check_output(cmd.split())
         except subprocess.CalledProcessError as e:
-            raise HAOpsError(f"failed to NFS export checkpoint directory, reason: {e}")
+            raise HAOpsError(f"failed to bootstrap microceph. command `{cmd}` failed with reason: {e}")
 
-    def get_activate_instance(self) -> Optional[str]:
-        """Return the hostname of the active controller instance. Return None if no controllers are active."""
-        # Example snippet of ping output:
-        #   "pings": [
-        #     {
-        #       "hostname": "juju-829e74-84",
-        #       "pinged": "DOWN",
-        #       "latency": 1850,
-        #       "mode": "primary"
-        #     },
-        #     {
-        #       "hostname": "juju-829e74-85",
-        #       "pinged": "UP",
-        #       "latency": 1278,
-        #       "mode": "backup1"
-        #     },
-        #     {
-        #       "hostname": "juju-829e74-86",
-        #       "pinged": "UP",
-        #       "latency": 984,
-        #       "mode": "backup2"
-        #     }
-        #   ],
-        ping_output = json.loads(self._charm._slurmctld.scontrol("ping", "--json"))
-        logger.debug("scontrol ping output: %s", ping_output)
 
-        # Slurm fails over to controllers in order. Active instance is the first that is "UP".
-        for host in ping_output["pings"]:
-            if host["pinged"] == "UP":
-                return host["hostname"]
+def add_disk(size="2G", count=1) -> None:
+    """Add a loop file disk of the given size and count."""
+    try:
+        subprocess.check_output(["microceph", "disk", "add", f"loop,{size},{count}"])
+    except subprocess.CalledProcessError as e:
+        raise HAOpsError(f"failed to add loop file disk with size={size} and count={count} to Ceph cluster. reason: {e}")
 
-        return None
 
-    def _on_failover(self, event) -> None:
-        """Promote this backup to the new active controller."""
-        logger.warning("failover event occurred. this unit is now the active controller")
-        self._stop_sync()
+def configure_mount(mountpoint="/mnt/ceph-ha") -> None:
+    mountpoint = Path(mountpoint)
+    logger.debug("creating mountpoint %s", mountpoint)
+    mountpoint.mkdir(mode=0o755, parents=True, exist_ok=True)
 
-        Path("/etc/auto.master.d/checkpoint.autofs").write_text("")
-        Path("/etc/auto.checkpoint").write_text("")
+    logger.debug("configuring autofs for %s", mountpoint)
+    Path("/etc/auto.master.d/checkpoint.autofs").write_text("/- /etc/auto.checkpoint\n")
+    Path("/etc/auto.checkpoint").write_text(f"{mountpoint} -fstype=ceph,name=admin,fs=checkpointFs ::/\n") #
+
+    try:
         systemd.service_reload("autofs", restart_on_failure=True)
+    except systemd.SystemdError as e:
+        raise HAOpsError(f"failed to reload autofs service. reason: {e}")
 
-        # Inform remaining units of failover
-        self._charm._slurmctld_peer.failover()
 
-    def _start_sync(self) -> None:
-        """Start AutoFS mount of active controller's checkpoints directory and begin synchronization to local directory."""
-        try:
-            systemd.service_reload("autofs", restart_on_failure=True)
-            #systemd.service_enable("checkpoint-sync.timer")
-            #systemd.service_start("checkpoint-sync.timer")
-        except systemd.SystemdError:
-            logger.exception("failed to set up checkpoint synchronization")
-            # TODO: raise exception
+def remake_checkpoint(ceph_checkpoint="/mnt/ceph-ha/checkpoint", user="slurm", group="slurm") -> None:
+    """Create a new checkpoint directory on CephFS storage owned by the given user and group."""
+    checkpoint = Path(ceph_checkpoint)
+    logger.debug("creating checkpoint directory %s", checkpoint)
+    checkpoint.mkdir(mode=0o755, parents=True, exist_ok=True)
+    logger.debug("reowning checkpoint directory %s to %s:%s", checkpoint, user, group)
+    shutil.chown(checkpoint, user, group)
 
-    def _stop_sync(self) -> None:
-        """Stop synchronization of active controller's checkpoints directory and unmount."""
-        systemd.service_disable("checkpoint-sync.timer")
-        systemd.service_stop("checkpoint-sync.timer")
-        # TODO: try this and fall back to `systemctl kill --signal=9 checkpoint-sync.service` in case of timeout?
-        systemd.service_stop("checkpoint-sync.service")
-        active_dir = f"{CHARM_MAINTAINED_SLURM_CONF_PARAMETERS['StateSaveLocation']}-active"
-        try:
-            # TODO: confirm this manual unmount is needed. Can AutoFS force unmount a stuck NFS share?
-            # TODO: include --lazy?
-            subprocess.check_call(["/usr/bin/umount", "--quiet", "--force", active_dir])
-        except subprocess.CalledProcessError as e:
-            # Unmount can fail if path is currently not mounted, e.g. unit is starting up and path hasn't been mounted before
-            # --quiet suppresses "not mounted" error messages but still gives a non-zero exit code
-            # Ignore errors that print no output
-            if e.stderr or e.output:
-                raise HAOpsError(
-                    f"failed to unmount NFS checkpoint directory {active_dir}, reason: {e}"
-                )
+
+def migrate(mountpoint="/mnt/ceph-ha") -> None:
+    """Move an existing local StateSaveLocation to CephFS"""
+    local = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+    target = Path(mountpoint)
+
+    # Ensure CephFS is mounted before trying move
+    if not target.is_mount():
+        logger.debug("forcing mount of %s", mountpoint)
+        # HACK FIXME: find better way
+        subprocess.run(["ls", "-l", mountpoint])
+        if not target.is_mount():
+            raise HAOpsError(f"failed to mount {target}. check config")
+
+    logger.debug("moving %s to %s", local, target)
+    shutil.move(local, target)
+
+    # shutil does not preserve ownership.
+    logger.debug("reowning %s to slurm user", target)
+    shutil.chown(target / local.name, "slurm", "slurm")
+    for item in (target / local.name).rglob("*"):
+        shutil.chown(item, "slurm", "slurm")
+
+
+def symlink(ceph_checkpoint="/mnt/ceph-ha/checkpoint") -> None:
+    """Replace existing StateSaveLocation with a symlink to the CephFS mount.
+
+    WARNING: Removes any local data in StateSaveLocation!
+    """
+    local_checkpoint = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+    if local_checkpoint.is_symlink():
+        logger.info("%s is already a symlink. skipping creation", local_checkpoint)
+        return
+
+    ceph_checkpoint = Path(ceph_checkpoint)
+    logger.debug("symlinking %s to %s", local_checkpoint, ceph_checkpoint)
+    if local_checkpoint.exists():
+        # TODO: Dangerous. Reassess use of rmtree.
+        logger.info("existing %s directory found. removing", local_checkpoint)
+        shutil.rmtree(local_checkpoint)
+
+    local_checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    local_checkpoint.symlink_to(ceph_checkpoint)
+
+
+def add(hostname) -> str:
+    """Return a MicroCeph token for the given hostname for joining the Ceph cluster."""
+    try:
+        token = subprocess.check_output(["microceph", "cluster", "add", hostname])
+    except subprocess.CalledProcessError as e:
+        raise HAOpsError(f"failed to generate a cluster joining token for {hostname}. reason: {e}")
+
+    return token.decode("utf-8").strip().rstrip("\n")
+
+
+def join(token) -> None:
+    """Join the Ceph cluster using the given MicroCeph token."""
+    # TODO: stop rejoin attempt.
+    try:
+         subprocess.check_output(["microceph", "cluster", "join", token])
+    except subprocess.CalledProcessError as e:
+        raise HAOpsError(f"failed to join Ceph cluster. reason: {e}")
+
