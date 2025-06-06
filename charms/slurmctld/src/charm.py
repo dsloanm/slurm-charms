@@ -183,6 +183,14 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
+        # This unit may be returning from a reboot, refresh configuration data from the peer relation.
+        if (slurm_conf := self._slurmctld_peer.slurm_conf):
+            self._slurmctld.config.dump(slurm_conf)
+        if (gres_conf := self._slurmctld_peer.gres_conf):
+            self._slurmctld.gres.dump(gres_conf)
+        if (auth_key := self._slurmctld_peer.auth_key):
+            self._slurmctld.munge.key.set(auth_key)
+
         try:
             self._slurmctld.munge.service.restart()
             self._slurmctld.service.enable()
@@ -241,9 +249,11 @@ class SlurmctldCharm(CharmBase):
     def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
         # Only slurm.conf update needed. New slurmctld controllers joining does not change any other conf file.
-        self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
+        # TODO: placed this after the update_controllers since sackd continued to use a stale slurm.conf when `_on_write_slurm_conf` happened prior.
+        # `sackd` missed an `scontrol reconfigure` somehow? Should we do an explicit `scontrol reconfigure` here?
+        self._on_write_slurm_conf(event)
 
     def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
         """Update slurmctld configuration on this peer. Observed only by non-leader instances when they receive configuration updates from the leader."""

@@ -115,6 +115,10 @@ class SlurmctldPeer(Object):
         # Triggered whenever a slurmctld instance observes a new instance:
         # - not triggered when there's only a single instance
         # - triggered once per instance in an HA setup (e.g. adding slurmctld/3 will trigger this method 3 times: once each for slurmctld/0, slurmctld/1, slurmctld/2)
+        if not self._charm.unit.is_leader():
+            return
+
+        # TODO: can we move all of below into the relation-changed event to avoid the defer? The unit writing its hostname into the database should trigger a relation-change.
         if not (hostname := self._relation.data[event.unit].get("hostname")):
             logger.debug(
                 "joining unit %s yet to add its hostname to databag: %s. deferring event",
@@ -122,9 +126,6 @@ class SlurmctldPeer(Object):
                 self._relation.data[event.unit],
             )
             event.defer()
-            return
-
-        if not self._charm.unit.is_leader():
             return
 
         # Provide a token to the new peer for joining the HA cluster.
@@ -138,7 +139,6 @@ class SlurmctldPeer(Object):
         self.on.slurmctld_available.emit()
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-        # The leader is the producer of relation changes. It does not need to consume any relation-changed events.
         if self._charm.unit.is_leader():
             return
 
