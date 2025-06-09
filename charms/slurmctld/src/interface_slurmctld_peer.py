@@ -6,7 +6,6 @@
 import json
 import logging
 import secrets
-import high_availability as ha
 from typing import Optional
 
 from constants import CLUSTER_NAME_PREFIX
@@ -105,7 +104,7 @@ class SlurmctldPeer(Object):
 
         # Retrieve the cluster name from either charm config or the app relation if already set.
         # Generate a new random name otherwise.
-        if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))):
+        if (charm_config_cluster_name := str(self._charm.config.get("cluster-name", ""))):
             cluster_name = charm_config_cluster_name
         elif (cluster_json := self._relation.data[self.model.app].get("cluster_info")):
             cluster_name = json.loads(cluster_json)["cluster_name"]
@@ -139,11 +138,6 @@ class SlurmctldPeer(Object):
             event.defer()
             return
 
-        # Provide a token to the new peer for joining the HA cluster.
-        if hostname+"-token" not in self._relation.data[self.model.app]:
-            token = ha.add(hostname)
-            self._relation.data[self.model.app][hostname+"-token"] = token
-
         # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
         # Appending here ensures this unit will be the last backup.
         self.add_controller(hostname)
@@ -152,13 +146,6 @@ class SlurmctldPeer(Object):
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         if self._charm.unit.is_leader():
             return
-
-        if (token := self._relation.data[self.model.app].get(f"{self._charm.hostname}-token")) and not self._charm._stored.joined_ceph_cluster:
-            ha.join(token)
-            ha.add_disk()
-            ha.configure_mount()
-            ha.symlink()
-            self._charm._stored.joined_ceph_cluster = True
 
         if (cluster_info := self._relation.data[self.model.app].get("cluster_info")):
             cluster_info = json.loads(cluster_info)

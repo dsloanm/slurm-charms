@@ -7,7 +7,6 @@
 import logging
 import shlex
 import subprocess
-import high_availability as ha
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
@@ -77,7 +76,6 @@ class SlurmctldCharm(CharmBase):
             user_supplied_slurm_conf_params=str(),
             acct_gather_params={},
             job_profiling_slurm_conf={},
-            joined_ceph_cluster=False,
         )
 
         self._slurmctld = SlurmctldManager(snap=False)
@@ -120,20 +118,6 @@ class SlurmctldCharm(CharmBase):
 
     def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
-        # Set up Microceph cluster for StateSaveLocation HA support
-        self.unit.status = WaitingStatus("installing microceph")
-        try:
-            ha.install()
-
-            if self.unit.is_leader():
-                ha.bootstrap()
-                ha.configure_mount()
-                self._stored.joined_ceph_cluster = True
-        except ha.HAOpsError as e:
-            logger.error(e.message)
-            event.defer()
-            return
-
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
             self._slurmctld.install()
@@ -143,10 +127,6 @@ class SlurmctldCharm(CharmBase):
             ]
 
             if self.unit.is_leader():
-                # Relocate the StateSaveLocation to remote storage before we start writing to it.
-                ha.remake_checkpoint()
-                ha.symlink()
-
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.jwt.generate()
@@ -175,11 +155,6 @@ class SlurmctldCharm(CharmBase):
         """
         if not self._stored.slurm_installed:
             logger.debug("attempted to start before slurm installed. deferring event")
-            event.defer()
-            return
-
-        if not self._stored.joined_ceph_cluster:
-            logger.debug("attempted to start before part of the Ceph cluster. deferring event")
             event.defer()
             return
 
