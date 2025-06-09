@@ -103,13 +103,24 @@ class SlurmctldPeer(Object):
         if not self._charm.unit.is_leader():
             return
 
+        # Retrieve the cluster name from either charm config or the app relation if already set.
+        # Generate a new random name otherwise.
+        if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))):
+            cluster_name = charm_config_cluster_name
+        elif (cluster_json := self._relation.data[self.model.app].get("cluster_info")):
+            cluster_name = json.loads(cluster_json)["cluster_name"]
+        else:
+            cluster_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
+
         self._relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "auth_key": self._charm.get_munge_key(),
-                "cluster_name": f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}",
+                "cluster_name": cluster_name,
                 "controllers": self._charm.hostname,
             }
         )
+
+        logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
 
     def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
         # Triggered whenever a slurmctld instance observes a new instance:

@@ -253,6 +253,7 @@ class SlurmctldCharm(CharmBase):
         self._slurmd.update_controllers()
         # TODO: placed this after the update_controllers since sackd continued to use a stale slurm.conf when `_on_write_slurm_conf` happened prior.
         # `sackd` missed an `scontrol reconfigure` somehow? Should we do an explicit `scontrol reconfigure` here?
+        # Is there a race condition between the services restarting and the `scontrol reconfigure`?
         self._on_write_slurm_conf(event)
 
     def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
