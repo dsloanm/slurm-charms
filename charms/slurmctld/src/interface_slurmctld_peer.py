@@ -105,7 +105,7 @@ class SlurmctldPeer(Object):
 
         # Retrieve the cluster name from either charm config or the app relation if already set.
         # Generate a new random name otherwise.
-        if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))):
+        if (charm_config_cluster_name := str(self._charm.config.get("cluster-name", ""))):
             cluster_name = charm_config_cluster_name
         elif (cluster_json := self._relation.data[self.model.app].get("cluster_info")):
             cluster_name = json.loads(cluster_json)["cluster_name"]
