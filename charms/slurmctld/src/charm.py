@@ -5,6 +5,7 @@
 """SlurmctldCharm."""
 
 import logging
+from pathlib import Path
 import shlex
 import subprocess
 from typing import Any, Dict, List, Optional, Union
@@ -118,6 +119,14 @@ class SlurmctldCharm(CharmBase):
 
     def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
+        # TODO: hpc-libs edits needed to fix permissions on mountpoint?
+        if self.config.get("use-network-state"):
+            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+            if not state_save_location.is_mount():
+                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+                event.defer()
+                return
+
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
             self._slurmctld.install()
@@ -157,6 +166,15 @@ class SlurmctldCharm(CharmBase):
             logger.debug("attempted to start before slurm installed. deferring event")
             event.defer()
             return
+
+        if self.config.get("use-network-state"):
+            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+            if not state_save_location.is_mount():
+                # TODO: BlockedStatus or WaitingStatus? Could this occur when user intervention is not required?
+                # e.g. After a reboot, before filesystem is remounted?
+                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+                event.defer()
+                return
 
         # This unit may be returning from a reboot, refresh configuration data from the peer relation.
         if (slurm_conf := self._slurmctld_peer.slurm_conf):
@@ -615,6 +633,12 @@ class SlurmctldCharm(CharmBase):
         - Slurmctld component installed
         - Munge running
         """
+        if self.config.get("use-network-state"):
+            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+            if not state_save_location.is_mount():
+                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+                return False
+
         if self.slurm_installed is not True:
             self.unit.status = BlockedStatus(
                 "failed to install slurmctld. see logs for further details"

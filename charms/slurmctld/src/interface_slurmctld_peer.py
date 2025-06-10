@@ -83,10 +83,6 @@ class SlurmctldPeer(Object):
             self._on_relation_created,
         )
         self.framework.observe(
-            self._charm.on[self._relation_name].relation_joined,
-            self._on_relation_joined,
-        )
-        self.framework.observe(
             self._charm.on[self._relation_name].relation_changed,
             self._on_relation_changed,
         )
@@ -97,6 +93,11 @@ class SlurmctldPeer(Object):
         return self.framework.model.get_relation(self._relation_name)
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
+        if self._charm.unit.is_leader() and not self._charm._stored.slurm_installed:
+            logger.debug("attempted to create peer relation before slurm installed. deferring event")
+            event.defer()
+            return
+
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
 
         if not self._charm.unit.is_leader():
@@ -121,30 +122,20 @@ class SlurmctldPeer(Object):
 
         logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
 
-    def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
-        # Triggered whenever a slurmctld instance observes a new instance:
-        # - not triggered when there's only a single instance
-        # - triggered once per instance in an HA setup (e.g. adding slurmctld/3 will trigger this method 3 times: once each for slurmctld/0, slurmctld/1, slurmctld/2)
-        if not self._charm.unit.is_leader():
-            return
-
-        # TODO: can we move all of below into the relation-changed event to avoid the defer? The unit writing its hostname into the database should trigger a relation-change.
-        if not (hostname := self._relation.data[event.unit].get("hostname")):
-            logger.debug(
-                "joining unit %s yet to add its hostname to databag: %s. deferring event",
-                event.unit,
-                self._relation.data[event.unit],
-            )
+    def _on_relation_changed(self, event: RelationChangedEvent) -> None:
+        if not self._charm._stored.slurm_installed:
+            logger.debug("attempted to change peer relation before slurm installed. deferring event")
             event.defer()
             return
 
-        # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
-        # Appending here ensures this unit will be the last backup.
-        self.add_controller(hostname)
-        self.on.slurmctld_available.emit()
-
-    def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         if self._charm.unit.is_leader():
+            # Add any new instances to list of controllers.
+            if event.unit and (event_hostname := self._relation.data[event.unit].get("hostname")):
+                if event_hostname not in self.controllers:
+                    # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
+                    # Appending here ensures this unit will be the last backup.
+                    self.add_controller(event_hostname)
+                    self.on.slurmctld_available.emit()
             return
 
         if (cluster_info := self._relation.data[self.model.app].get("cluster_info")):
