@@ -5,9 +5,10 @@
 """SlurmctldCharm."""
 
 import logging
-from pathlib import Path
 import shlex
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
@@ -22,8 +23,9 @@ from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavail
 from interface_sackd import Sackd
 from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
-    SlurmctldChangedEvent,
+    SlurmctldDepartedEvent,
     SlurmctldPeer,
+    SlurmctldPeerAvailableEvent,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -99,8 +101,9 @@ class SlurmctldCharm(CharmBase):
             self.on.start: self._on_start,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
-            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
-            self._slurmctld_peer.on.slurmctld_changed: self._on_slurmctld_changed,
+            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_changed,
+            self._slurmctld_peer.on.slurmctld_departed: self._on_slurmctld_changed,
+            self._slurmctld_peer.on.slurmctld_peer_available: self._on_slurmctld_peer_available,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -119,14 +122,6 @@ class SlurmctldCharm(CharmBase):
 
     def _on_install(self, event: InstallEvent) -> None:
         """Perform installation operations for slurmctld."""
-        # TODO: hpc-libs edits needed to fix permissions on mountpoint?
-        if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-            if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
-                event.defer()
-                return
-
         self.unit.status = WaitingStatus("installing slurmctld")
         try:
             self._slurmctld.install()
@@ -138,14 +133,10 @@ class SlurmctldCharm(CharmBase):
             if self.unit.is_leader():
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
-                self._slurmctld.jwt.generate()
                 self._slurmctld.munge.key.generate()
 
-                # Non-leader units flag themselves as installed in the `slurmctld_changed` event,
-                # after they have received config data from the leader.
-                self.slurm_installed = True
-
             self.unit.set_workload_version(self._slurmctld.version())
+            self.slurm_installed = True
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -170,33 +161,47 @@ class SlurmctldCharm(CharmBase):
         if self.config.get("use-network-state"):
             state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
             if not state_save_location.is_mount():
-                # TODO: BlockedStatus or WaitingStatus? Could this occur when user intervention is not required?
-                # e.g. After a reboot, before filesystem is remounted?
-                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+                self.unit.status = BlockedStatus(
+                    f"waiting for {state_save_location} to be mounted"
+                )
                 event.defer()
                 return
 
-        # This unit may be returning from a reboot, refresh configuration data from the peer relation.
-        if (slurm_conf := self._slurmctld_peer.slurm_conf):
+            # TODO: hpc-libs edits needed to fix permissions on mountpoint? Or change StateSaveLocation to a subdirectory of the mount point?
+            shutil.chown(state_save_location, "slurm", "slurm")
+
+        if not self._slurmctld.jwt.path.exists():
+            if not self.unit.is_leader():
+                logger.debug("waiting for leader to generate JWT key. deferring event")
+                event.defer()
+                return
+            self._slurmctld.jwt.generate()
+
+        # This unit may be returning from a reboot and have stale configuration data.
+        # Refresh from the peer relation.
+        if slurm_conf := self._slurmctld_peer.slurm_conf:
             self._slurmctld.config.dump(slurm_conf)
-        if (gres_conf := self._slurmctld_peer.gres_conf):
+        if gres_conf := self._slurmctld_peer.gres_conf:
             self._slurmctld.gres.dump(gres_conf)
-        if (auth_key := self._slurmctld_peer.auth_key):
+        if auth_key := self._slurmctld_peer.auth_key:
             self._slurmctld.munge.key.set(auth_key)
+
+        if not self.unit.is_leader() and not self._slurmctld.config.path.exists():
+            logger.debug("waiting for leader to provide slurm.conf. deferring event")
+            event.defer()
+            return
 
         try:
             self._slurmctld.munge.service.restart()
-            self._slurmctld.service.enable()
 
             if self.unit.is_leader():
-                # Leader's slurmctld service is started within this function.
                 self._on_write_slurm_conf(event)
-            else:
-                self._slurmctld.service.restart()
-                self._check_status()
 
+            self._slurmctld.service.enable()
+            self._slurmctld.service.restart()
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
+            self._check_status()
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -239,25 +244,25 @@ class SlurmctldCharm(CharmBase):
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
 
-    def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
+    def _on_slurmctld_changed(
+        self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
+    ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # Only slurm.conf update needed. New slurmctld controllers joining does not change any other conf file.
+        # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
-        # TODO: placed this after the update_controllers since sackd continued to use a stale slurm.conf when `_on_write_slurm_conf` happened prior.
-        # `sackd` missed an `scontrol reconfigure` somehow? Should we do an explicit `scontrol reconfigure` here?
-        # Is there a race condition between the services restarting and the `scontrol reconfigure`?
         self._on_write_slurm_conf(event)
 
-    def _on_slurmctld_changed(self, event: SlurmctldChangedEvent) -> None:
+    def _on_slurmctld_peer_available(self, event: SlurmctldPeerAvailableEvent) -> None:
         """Update slurmctld configuration on this peer. Observed only by non-leader instances when they receive configuration updates from the leader."""
-        self._slurmctld.config.dump(event.slurm_conf)
-        if event.gres_conf:
-            self._slurmctld.gres.dump(event.gres_conf)
-        self._slurmctld.munge.key.set(event.auth_key)
+        self._slurmctld.config.dump(self._slurmctld_peer.slurm_conf)
+        if self._slurmctld_peer.gres_conf:
+            self._slurmctld.gres.dump(self._slurmctld_peer.gres_conf)
+        self._slurmctld.munge.key.set(self._slurmctld_peer.auth_key)
 
-        # Prevents slurmctld service from starting on a non-leader until all files are in place.
-        self.slurm_installed = True
+        self._slurmctld.munge.service.restart()
+        self._slurmctld.service.restart()
+        self._check_status()
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
@@ -449,6 +454,8 @@ class SlurmctldCharm(CharmBase):
             InfluxDBAvailableEvent,
             InfluxDBUnavailableEvent,
             StartEvent,
+            SlurmctldAvailableEvent,
+            SlurmctldDepartedEvent,
             SlurmdbdAvailableEvent,
             SlurmdbdUnavailableEvent,
             SlurmdDepartedEvent,
@@ -636,7 +643,9 @@ class SlurmctldCharm(CharmBase):
         if self.config.get("use-network-state"):
             state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
             if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+                self.unit.status = BlockedStatus(
+                    f"waiting for {state_save_location} to be mounted"
+                )
                 return False
 
         if self.slurm_installed is not True:
