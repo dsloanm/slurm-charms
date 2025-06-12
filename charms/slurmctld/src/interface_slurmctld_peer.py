@@ -17,7 +17,6 @@ from ops import (
     RelationCreatedEvent,
     RelationDepartedEvent,
 )
-from slurmutils.models import SlurmConfig
 
 logger = logging.getLogger()
 
@@ -34,13 +33,21 @@ class SlurmctldPeerError(Exception):
 class SlurmctldAvailableEvent(EventBase):
     """Emitted when a new controller instance joins."""
 
+    def __init__(self, handle, controller: str):
+        super().__init__(handle)
+        self.controller = controller
+
+    def snapshot(self):
+        """Snapshot the event data."""
+        return {"controller": self.controller}
+
+    def restore(self, snapshot):
+        """Restore the snapshot of the event data."""
+        self.controller = snapshot.get("controller")
+
 
 class SlurmctldDepartedEvent(EventBase):
     """Emitted when a controller leaves."""
-
-
-class SlurmctldPeerAvailableEvent(EventBase):
-    """Emitted when a non-leader controller receives a configuration update from the leader."""
 
 
 class Events(ObjectEvents):
@@ -48,7 +55,6 @@ class Events(ObjectEvents):
 
     slurmctld_available = EventSource(SlurmctldAvailableEvent)
     slurmctld_departed = EventSource(SlurmctldDepartedEvent)
-    slurmctld_peer_available = EventSource(SlurmctldPeerAvailableEvent)
 
 
 class SlurmctldPeer(Object):
@@ -78,7 +84,7 @@ class SlurmctldPeer(Object):
     @property
     def _relation(self):
         """Slurmctld peer relation."""
-        if (relation := self.framework.model.get_relation(self._relation_name)):
+        if relation := self.framework.model.get_relation(self._relation_name):
             return relation
         raise SlurmctldPeerError("attempted to access peer relation before it was established")
 
@@ -86,6 +92,12 @@ class SlurmctldPeer(Object):
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
 
         if not self._charm.unit.is_leader():
+            return
+
+        # Can occur if all other slurmctld instances are down and a new one is added.
+        # The new unit is elected leader as it is starting and clears any existing cluster_info if this check is not in place.
+        if "cluster_info" in self._relation.data[self.model.app]:
+            logger.debug("cluster_info already exists in peer relation. skipping initialization")
             return
 
         # Retrieve the cluster name from either charm config or the app relation if it's already set.
@@ -105,10 +117,6 @@ class SlurmctldPeer(Object):
             }
         )
 
-        self._relation.data[self.model.app]["slurmctld_confs"] = json.dumps(
-            { "slurm": "", "acct_gather": "", "cgroup": "", "gres": "" }
-        )
-
         logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
@@ -116,19 +124,18 @@ class SlurmctldPeer(Object):
             # Add any new instances to list of controllers.
             if event.unit and (event_hostname := self._relation.data[event.unit].get("hostname")):
                 if event_hostname not in self.controllers:
-                    # List dictates order that hostnames are written to slurm.conf, i.e. controller failover order.
-                    # Appending here ensures this unit will be the last backup.
-                    self.add_controller(event_hostname)
-                    self.on.slurmctld_available.emit()
+                    self.on.slurmctld_available.emit(event_hostname)
             return
 
-        if slurmctld_confs := self._relation.data[self.model.app].get("slurmctld_confs"):
-            slurmctld_confs = json.loads(slurmctld_confs)
-
-            if slurm_str := slurmctld_confs.get("slurm"):
-                slurm_conf = SlurmConfig.from_str(slurm_str)
-                if self._charm.hostname in slurm_conf.slurmctld_host:
-                    self.on.slurmctld_peer_available.emit()
+        # In an HA setup, peers wait for the leader to add their hostname to the peer relation before
+        # flagging themselves ready
+        if cluster_info := self._relation.data[self.model.app].get("cluster_info"):
+            cluster_info = json.loads(cluster_info)
+            if auth_key := cluster_info.get("auth_key"):
+                self._charm._slurmctld.munge.key.set(auth_key)
+            if controllers := cluster_info.get("controllers"):
+                if self._charm.hostname in controllers:
+                    self._charm._stored.controller_ready = True
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handle hook when a unit departs."""
@@ -138,7 +145,6 @@ class SlurmctldPeer(Object):
         # Remove departing unit from list of controllers by enumerating all remaining units and removing the extra hostname.
         # Required as departing unit hostname is no longer available from its databag.
         remaining_controllers = set()
-        # TODO: why is self._relation.units empty here with 1 primary, 1 backup and the backup departs?
         for unit in self._relation.data:
             remaining_controllers.add(self._relation.data[unit].get("hostname"))
         departing_controllers = [
@@ -198,48 +204,3 @@ class SlurmctldPeer(Object):
     def cluster_name(self) -> str:
         """Return the cluster_name from app relation data."""
         return self._property_get("cluster_info", "cluster_name")
-
-    @property
-    def slurmctld_confs(self) -> str:
-        """Return all slurmctld_confs from app relation data."""
-        return json.loads(self._relation.data[self.model.app]["slurmctld_confs"])
-
-    @property
-    def slurm_conf(self) -> str:
-        """Return the slurm_conf from app relation data."""
-        return self._property_get("slurmctld_confs", "slurm")
-
-    @slurm_conf.setter
-    def slurm_conf(self, value: str) -> None:
-        """Set the slurm_conf on app relation data."""
-        self._property_set("slurmctld_confs", "slurm", value)
-
-    @property
-    def acct_gather_conf(self) -> str:
-        """Return the acct_gather_conf from app relation data."""
-        return self._property_get("slurmctld_confs", "acct_gather")
-
-    @acct_gather_conf.setter
-    def acct_gather_conf(self, value: str) -> None:
-        """Set the acct_gather_conf on app relation data."""
-        self._property_set("slurmctld_confs", "acct_gather", value)
-
-    @property
-    def cgroup_conf(self) -> str:
-        """Return the cgroup_conf from app relation data."""
-        return self._property_get("slurmctld_confs", "cgroup")
-
-    @cgroup_conf.setter
-    def cgroup_conf(self, value: str) -> None:
-        """Set the cgroup_conf on app relation data."""
-        self._property_set("slurmctld_confs", "cgroup", value)
-
-    @property
-    def gres_conf(self) -> str:
-        """Return the gres_conf from app relation data."""
-        return self._property_get("slurmctld_confs", "gres")
-
-    @gres_conf.setter
-    def gres_conf(self, value: str) -> None:
-        """Set the gres_conf on app relation data."""
-        self._property_set("slurmctld_confs", "gres", value)

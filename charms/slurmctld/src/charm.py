@@ -25,7 +25,6 @@ from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
     SlurmctldDepartedEvent,
     SlurmctldPeer,
-    SlurmctldPeerAvailableEvent,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -75,6 +74,7 @@ class SlurmctldCharm(CharmBase):
             nhc_params=str(),
             save_state_location=str(),
             slurm_installed=False,
+            controller_ready=False,
             slurmdbd_host=str(),
             user_supplied_slurm_conf_params=str(),
             acct_gather_params={},
@@ -101,9 +101,8 @@ class SlurmctldCharm(CharmBase):
             self.on.start: self._on_start,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
-            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_changed,
-            self._slurmctld_peer.on.slurmctld_departed: self._on_slurmctld_changed,
-            self._slurmctld_peer.on.slurmctld_peer_available: self._on_slurmctld_peer_available,
+            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
+            self._slurmctld_peer.on.slurmctld_departed: self._on_slurmctld_departed,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -134,6 +133,7 @@ class SlurmctldCharm(CharmBase):
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.munge.key.generate()
+                self._stored.controller_ready = True
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -141,6 +141,35 @@ class SlurmctldCharm(CharmBase):
             logger.error(e.message)
             event.defer()
             return
+
+    def _configure_checkpoint_mount(self, event: StartEvent) -> None:
+        """Configure the network mount for StateSaveLocation data."""
+        state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+        if not state_save_location.is_mount():
+            self.unit.status = BlockedStatus(f"waiting for {state_save_location} to be mounted")
+            event.defer()
+            return
+
+        # In an HA setup, all instances require access to identical conf files.
+        # To accomplish this, the leader migrates /etc/slurm to the shared storage then everyone replaces their /etc/slurm with a symlink to the new location.
+        etc_target = state_save_location / "etc-slurm"
+        # TODO: pull this from hpclibs? May be different for Slurm snap.
+        etc_source = Path("/etc/slurm")
+        if self.unit.is_leader() and not etc_target.exists():
+            logger.debug("migrating %s to %s", etc_source, etc_target)
+            shutil.move(etc_source, etc_target)
+        if not (etc_source.is_symlink() and etc_source.resolve() == etc_target):
+            logger.debug("removing any existing %s", etc_source)
+            try:
+                shutil.rmtree(etc_source)
+            except FileNotFoundError:
+                pass
+
+            logger.debug("symlinking %s to %s", etc_source, etc_target)
+            etc_source.symlink_to(etc_target)
+
+        # TODO: hpc-libs edits needed to fix permissions on mountpoint? Or change StateSaveLocation to a subdirectory of the mount point?
+        shutil.chown(state_save_location, "slurm", "slurm")
 
     def _on_start(self, event: StartEvent) -> None:
         """Set cluster_name and write slurm.conf.
@@ -153,41 +182,11 @@ class SlurmctldCharm(CharmBase):
               first execution of this hook, we log and return on any subsequent start hook
               event executions.
         """
-        if not self._stored.slurm_installed:
-            logger.debug("attempted to start before slurm installed. deferring event")
-            event.defer()
-            return
-
         if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-            if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(
-                    f"waiting for {state_save_location} to be mounted"
-                )
-                event.defer()
-                return
+            self._configure_checkpoint_mount(event)
 
-            # TODO: hpc-libs edits needed to fix permissions on mountpoint? Or change StateSaveLocation to a subdirectory of the mount point?
-            shutil.chown(state_save_location, "slurm", "slurm")
-
-        if not self._slurmctld.jwt.path.exists():
-            if not self.unit.is_leader():
-                logger.debug("waiting for leader to generate JWT key. deferring event")
-                event.defer()
-                return
-            self._slurmctld.jwt.generate()
-
-        # This unit may be returning from a reboot and have stale configuration data.
-        # Refresh from the peer relation.
-        if slurm_conf := self._slurmctld_peer.slurm_conf:
-            self._slurmctld.config.dump(slurm_conf)
-        if gres_conf := self._slurmctld_peer.gres_conf:
-            self._slurmctld.gres.dump(gres_conf)
-        if auth_key := self._slurmctld_peer.auth_key:
-            self._slurmctld.munge.key.set(auth_key)
-
-        if not self.unit.is_leader() and not self._slurmctld.config.path.exists():
-            logger.debug("waiting for leader to provide slurm.conf. deferring event")
+        if not self._stored.controller_ready:
+            logger.debug("attempted to start before controller ready. deferring event")
             event.defer()
             return
 
@@ -195,6 +194,8 @@ class SlurmctldCharm(CharmBase):
             self._slurmctld.munge.service.restart()
 
             if self.unit.is_leader():
+                if not self._slurmctld.jwt.path.exists():
+                    self._slurmctld.jwt.generate()
                 self._on_write_slurm_conf(event)
 
             self._slurmctld.service.enable()
@@ -244,25 +245,20 @@ class SlurmctldCharm(CharmBase):
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
 
-    def _on_slurmctld_changed(
-        self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
-    ) -> None:
+    def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
         # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
+        self._on_write_slurm_conf(event)
+        self._slurmctld_peer.add_controller(event.controller)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
+
+    def _on_slurmctld_departed(self, event: SlurmctldDepartedEvent) -> None:
+        """Update slurmctld configuration and list of controllers on all Slurm services."""
+        # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
-
-    def _on_slurmctld_peer_available(self, event: SlurmctldPeerAvailableEvent) -> None:
-        """Update slurmctld configuration on this peer. Observed only by non-leader instances when they receive configuration updates from the leader."""
-        self._slurmctld.config.dump(self._slurmctld_peer.slurm_conf)
-        if self._slurmctld_peer.gres_conf:
-            self._slurmctld.gres.dump(self._slurmctld_peer.gres_conf)
-        self._slurmctld.munge.key.set(self._slurmctld_peer.auth_key)
-
-        self._slurmctld.munge.service.restart()
-        self._slurmctld.service.restart()
-        self._check_status()
+        self._sackd.update_controllers()
+        self._slurmd.update_controllers()
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
@@ -412,7 +408,6 @@ class SlurmctldCharm(CharmBase):
 
             with self._slurmctld.gres.edit() as config:
                 config.nodes[node_name] = gres_nodes
-                self._slurmctld_peer.gres_conf = str(config)
 
     def _refresh_gres_conf(self, event: SlurmdDepartedEvent) -> None:
         """Write out current gres.conf configuration file for Generic Resource scheduling.
@@ -431,7 +426,6 @@ class SlurmctldCharm(CharmBase):
         gres_all_nodes = self._slurmd.get_all_gres_info()
         gres_conf = GRESConfig(Nodes=gres_all_nodes)
         self._slurmctld.gres.dump(gres_conf)
-        self._slurmctld_peer.gres_conf = str(gres_conf)
 
     def _assemble_acct_gather_config(self) -> Optional[AcctGatherConfig]:
         """Assemble and return the AcctGatherConfig."""
@@ -527,8 +521,6 @@ class SlurmctldCharm(CharmBase):
             # slurmrestd needs the slurm.conf file, so send it every time it changes.
             if self._slurmrestd.is_joined is not False and self._stored.slurmdbd_host != "":
                 self._slurmrestd.set_slurm_config_on_app_relation_data(str(slurm_config))
-
-            self._slurmctld_peer.slurm_conf = str(slurm_config)
         else:
             logger.debug("## Should write slurm.conf, but we don't have it. Deferring.")
             event.defer()
@@ -582,10 +574,8 @@ class SlurmctldCharm(CharmBase):
 
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            # SlurmctldAddr=self._ingress_address, # TODO: confirm safe to remove
-            SlurmctldHost=self._slurmctld_peer.controllers.split(
-                ","
-            ),  # Note: order of this list determines failover order
+            # Order of SlurmctldHost list determines controller failover order
+            SlurmctldHost=self._slurmctld_peer.controllers.split(","),
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
