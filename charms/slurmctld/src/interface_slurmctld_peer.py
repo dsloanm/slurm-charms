@@ -70,6 +70,10 @@ class SlurmctldPeer(Object):
             self._charm.on[self._relation_name].relation_changed,
             self._on_relation_changed,
         )
+        self.framework.observe(
+            self._charm.on[self._relation_name].relation_departed,
+            self._on_relation_departed,
+        )
 
     @property
     def _relation(self):
@@ -134,7 +138,8 @@ class SlurmctldPeer(Object):
         # Remove departing unit from list of controllers by enumerating all remaining units and removing the extra hostname.
         # Required as departing unit hostname is no longer available from its databag.
         remaining_controllers = set()
-        for unit in self._relation.units:
+        # TODO: why is self._relation.units empty here with 1 primary, 1 backup and the backup departs?
+        for unit in self._relation.data:
             remaining_controllers.add(self._relation.data[unit].get("hostname"))
         departing_controllers = [
             controller
