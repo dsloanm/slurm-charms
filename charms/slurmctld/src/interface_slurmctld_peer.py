@@ -33,18 +33,6 @@ class SlurmctldPeerError(Exception):
 class SlurmctldAvailableEvent(EventBase):
     """Emitted when a new controller instance joins."""
 
-    def __init__(self, handle, controller: str):
-        super().__init__(handle)
-        self.controller = controller
-
-    def snapshot(self):
-        """Snapshot the event data."""
-        return {"controller": self.controller}
-
-    def restore(self, snapshot):
-        """Restore the snapshot of the event data."""
-        self.controller = snapshot.get("controller")
-
 
 class SlurmctldDepartedEvent(EventBase):
     """Emitted when a controller leaves."""
@@ -113,7 +101,6 @@ class SlurmctldPeer(Object):
             {
                 "auth_key": self._charm.get_munge_key(),
                 "cluster_name": cluster_name,
-                "controllers": self._charm.hostname,
             }
         )
 
@@ -121,40 +108,28 @@ class SlurmctldPeer(Object):
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         if self._charm.unit.is_leader():
-            # Add any new instances to list of controllers.
-            if event.unit and (event_hostname := self._relation.data[event.unit].get("hostname")):
-                if event_hostname not in self.controllers:
-                    self.on.slurmctld_available.emit(event_hostname)
+            self.on.slurmctld_available.emit()
             return
 
-        # In an HA setup, peers wait for the leader to add their hostname to the peer relation before
-        # flagging themselves ready
+        # In an HA setup, peers wait for the leader to add their hostname to slurm.conf before
+        # flagging themselves ready.
+        # Check if path exists first to avoid peer creating a blank slurm.conf on edit.
+        # TODO: what if leader is partially through a write to slurm.conf and we read a malformed file? try/except: defer()?
+        if self._charm._slurmctld.config.path.exists():
+            with self._charm._slurmctld.config.edit() as config:
+                if self._charm.hostname in config.slurmctld_host:
+                    self._charm._stored.controller_ready = True
+
+        # TODO: remove this once rebased with auth/slurm changes.
         if cluster_info := self._relation.data[self.model.app].get("cluster_info"):
             cluster_info = json.loads(cluster_info)
             if auth_key := cluster_info.get("auth_key"):
                 self._charm._slurmctld.munge.key.set(auth_key)
-            if controllers := cluster_info.get("controllers"):
-                if self._charm.hostname in controllers:
-                    self._charm._stored.controller_ready = True
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handle hook when a unit departs."""
         if not self._charm.unit.is_leader():
             return
-
-        # Remove departing unit from list of controllers by enumerating all remaining units and removing the extra hostname.
-        # Required as departing unit hostname is no longer available from its databag.
-        remaining_controllers = set()
-        for unit in self._relation.data:
-            remaining_controllers.add(self._relation.data[unit].get("hostname"))
-        departing_controllers = [
-            controller
-            for controller in self.controllers.split(",")
-            if controller not in remaining_controllers
-        ]
-
-        for controller in departing_controllers:
-            self.remove_controller(controller)
 
         self.on.slurmctld_departed.emit()
 
@@ -171,29 +146,9 @@ class SlurmctldPeer(Object):
         logger.debug("peer relation data %s set to %s", info_name, info)
 
     @property
-    def controllers(self) -> str:
-        """Return the controllers from app relation data."""
-        return self._property_get("cluster_info", "controllers")
-
-    def add_controller(self, hostname: str) -> None:
-        """Append the given hostname to the list of controllers if not already present."""
-        controllers = self._property_get("cluster_info", "controllers")
-        if hostname not in controllers:
-            controllers += f",{hostname}"
-            self._property_set("cluster_info", "controllers", controllers)
-
-    def remove_controller(self, hostname: str) -> None:
-        """Remove the given hostname from the list of controllers."""
-        controllers = self._property_get("cluster_info", "controllers").split(",")
-        try:
-            controllers.remove(hostname)
-            self._property_set("cluster_info", "controllers", ",".join(controllers))
-        except ValueError:
-            logger.warning(
-                "failed to remove controller %s as not present in current list of controllers: %s",
-                hostname,
-                controllers,
-            )
+    def controllers(self) -> list:
+        """Return the list of controllers."""
+        return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
 
     @property
     def auth_key(self) -> str:

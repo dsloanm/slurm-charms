@@ -4,6 +4,7 @@
 
 """SlurmctldCharm."""
 
+import json
 import logging
 import shlex
 import shutil
@@ -101,8 +102,8 @@ class SlurmctldCharm(CharmBase):
             self.on.start: self._on_start,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
-            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_available,
-            self._slurmctld_peer.on.slurmctld_departed: self._on_slurmctld_departed,
+            self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_changed,
+            self._slurmctld_peer.on.slurmctld_departed: self._on_slurmctld_changed,
             self._slurmdbd.on.slurmdbd_available: self._on_slurmdbd_available,
             self._slurmdbd.on.slurmdbd_unavailable: self._on_slurmdbd_unavailable,
             self._slurmd.on.partition_available: self._on_write_slurm_conf,
@@ -245,15 +246,7 @@ class SlurmctldCharm(CharmBase):
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
 
-    def _on_slurmctld_available(self, event: SlurmctldAvailableEvent) -> None:
-        """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
-        self._on_write_slurm_conf(event)
-        self._slurmctld_peer.add_controller(event.controller)
-        self._sackd.update_controllers()
-        self._slurmd.update_controllers()
-
-    def _on_slurmctld_departed(self, event: SlurmctldDepartedEvent) -> None:
+    def _on_slurmctld_changed(self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
         # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
@@ -574,8 +567,7 @@ class SlurmctldCharm(CharmBase):
 
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            # Order of SlurmctldHost list determines controller failover order
-            SlurmctldHost=self._slurmctld_peer.controllers.split(","),
+            SlurmctldHost=self.get_controllers(),
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
@@ -650,8 +642,32 @@ class SlurmctldCharm(CharmBase):
         #     self.unit.status = BlockedStatus("Error configuring munge key")
         #     return False
 
-        self.unit.status = ActiveStatus("")
+        try:
+            status = "Active" if self.get_activate_instance() == self.hostname else "Backup"
+        except Exception as e:
+            logger.warning("failed to query controller active status. reason %s", e)
+            status = ""
+
+        self.unit.status = ActiveStatus(status)
         return True
+
+    def get_controllers(self) -> list[str]:
+        """Get hostnames for all controllers."""
+        # Read the current list of controllers from the slurm.conf file and compare with the controllers currently in the peer relation.
+        # File ordering must be preserved as it dictates which slurmctld instance is the primary and which are backups.
+        from_file = []
+        if self._slurmctld.config.path.exists():
+            with self._slurmctld.config.edit() as config:
+                if (hosts := config.slurmctld_host):
+                    from_file = hosts
+        from_peer = self._slurmctld_peer.controllers
+
+        # Controllers in the file but not the peer relation have departed.
+        # Controllers in the peer relation but not the file are newly added.
+        current_controllers = [c for c in from_file if c in from_peer] + \
+                              [c for c in from_peer if c not in from_file]
+
+        return current_controllers
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
@@ -660,6 +676,39 @@ class SlurmctldCharm(CharmBase):
     def get_jwt_rsa(self) -> Optional[str]:
         """Get the stored jwt_rsa key."""
         return str(self._slurmctld.jwt.get())
+
+    def get_activate_instance(self) -> str:
+        """Return the hostname of the active controller instance. Return empty string if no controllers are active."""
+        # Example snippet of ping output:
+        #   "pings": [
+        #     {
+        #       "hostname": "juju-829e74-84",
+        #       "pinged": "DOWN",
+        #       "latency": 1850,
+        #       "mode": "primary"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-85",
+        #       "pinged": "UP",
+        #       "latency": 1278,
+        #       "mode": "backup1"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-86",
+        #       "pinged": "UP",
+        #       "latency": 984,
+        #       "mode": "backup2"
+        #     }
+        #   ],
+        ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
+        logger.debug("scontrol ping output: %s", ping_output)
+
+        # Slurm fails over to controllers in order. Active instance is the first that is "UP".
+        for host in ping_output["pings"]:
+            if host["pinged"] == "UP":
+                return host["hostname"]
+
+        return ""
 
     def _resume_nodes(self, nodelist: List[str]) -> None:
         """Run scontrol to resume the specified node list."""

@@ -303,6 +303,6 @@ class Slurmd(Object):
         for rel in self.model.relations.get(self._relation_name, ()):
             if rel and "cluster_info" in rel.data[self.model.app]:
                 cluster_info = json.loads(rel.data[self.model.app]["cluster_info"])
-                cluster_info["slurmctld_hosts"] = self._charm._slurmctld_peer.controllers
+                cluster_info["slurmctld_hosts"] = self._charm.get_controllers()
                 rel.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
                 logger.debug("slurmd cluster_info set to %s", cluster_info)
