@@ -5,9 +5,7 @@
 
 import json
 import logging
-import secrets
 
-from constants import CLUSTER_NAME_PREFIX
 from ops import (
     EventBase,
     EventSource,
@@ -88,19 +86,9 @@ class SlurmctldPeer(Object):
             logger.debug("cluster_info already exists in peer relation. skipping initialization")
             return
 
-        # Retrieve the cluster name from either charm config or the app relation if it's already set.
-        # Otherwise, generate a new random name.
-        if charm_config_cluster_name := str(self._charm.config.get("cluster-name", "")):
-            cluster_name = charm_config_cluster_name
-        elif cluster_json := self._relation.data[self.model.app].get("cluster_info"):
-            cluster_name = json.loads(cluster_json)["cluster_name"]
-        else:
-            cluster_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
-
         self._relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "auth_key": self._charm.get_munge_key(),
-                "cluster_name": cluster_name,
             }
         )
 
@@ -115,9 +103,12 @@ class SlurmctldPeer(Object):
         # flagging themselves ready.
         # Check if path exists first to avoid peer creating a blank slurm.conf on edit.
         # TODO: what if leader is partially through a write to slurm.conf and we read a malformed file? try/except: defer()?
+        logger.debug("checking if slurm.conf contains hostname of this peer")
         if self._charm._slurmctld.config.path.exists():
             with self._charm._slurmctld.config.edit() as config:
+                logger.debug("checking for %s in slurmctld_hosts: %s", self._charm.hostname, config.slurmctld_host)
                 if self._charm.hostname in config.slurmctld_host:
+                    logger.debug("found this peer in slurm.conf. setting controller ready")
                     self._charm._stored.controller_ready = True
 
         # TODO: remove this once rebased with auth/slurm changes.
@@ -138,13 +129,6 @@ class SlurmctldPeer(Object):
         info = json.loads(self._relation.data[self.model.app][info_name])
         return info.get(property_name, "")
 
-    def _property_set(self, info_name, property_name, property_value: str) -> None:
-        """Set the property on app relation data."""
-        info = json.loads(self._relation.data[self.model.app][info_name])
-        info[property_name] = property_value
-        self._relation.data[self.model.app][info_name] = json.dumps(info)
-        logger.debug("peer relation data %s set to %s", info_name, info)
-
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
@@ -154,8 +138,3 @@ class SlurmctldPeer(Object):
     def auth_key(self) -> str:
         """Return the auth_key from app relation data."""
         return self._property_get("cluster_info", "auth_key")
-
-    @property
-    def cluster_name(self) -> str:
-        """Return the cluster_name from app relation data."""
-        return self._property_get("cluster_info", "cluster_name")

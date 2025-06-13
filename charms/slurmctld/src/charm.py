@@ -6,6 +6,7 @@
 
 import json
 import logging
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    CLUSTER_NAME_PREFIX,
     PEER_RELATION,
 )
 from exceptions import IngressAddressUnavailableError
@@ -75,7 +77,6 @@ class SlurmctldCharm(CharmBase):
             nhc_params=str(),
             save_state_location=str(),
             slurm_installed=False,
-            controller_ready=False,
             slurmdbd_host=str(),
             user_supplied_slurm_conf_params=str(),
             acct_gather_params={},
@@ -134,7 +135,6 @@ class SlurmctldCharm(CharmBase):
                 # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
                 #  Use Juju Secrets instead of StoredState for exchanging keys between units.
                 self._slurmctld.munge.key.generate()
-                self._stored.controller_ready = True
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -156,7 +156,7 @@ class SlurmctldCharm(CharmBase):
         etc_target = state_save_location / "etc-slurm"
         # TODO: pull this from hpclibs? May be different for Slurm snap.
         etc_source = Path("/etc/slurm")
-        if self.unit.is_leader() and not etc_target.exists():
+        if self.unit.is_leader() and not etc_target.exists() and etc_source.is_dir():
             logger.debug("migrating %s to %s", etc_source, etc_target)
             shutil.move(etc_source, etc_target)
         if not (etc_source.is_symlink() and etc_source.resolve() == etc_target):
@@ -186,10 +186,21 @@ class SlurmctldCharm(CharmBase):
         if self.config.get("use-network-state"):
             self._configure_checkpoint_mount(event)
 
-        if not self._stored.controller_ready:
-            logger.debug("attempted to start before controller ready. deferring event")
-            event.defer()
-            return
+        # Peers defer until leader writes out configuration file(s)
+        if not self.unit.is_leader():
+            if not self._slurmctld.config.path.exists():
+                logger.debug("%s not found. deferring event", self._slurmctld.config.path)
+                event.defer()
+                return
+
+            with self._slurmctld.config.edit() as config:
+                logger.debug("checking for %s in slurmctld_hosts: %s", self.hostname, config.slurmctld_host)
+                if self.hostname in config.slurmctld_host:
+                    logger.debug("found %s in slurm.conf. setting controller ready", self.hostname)
+                else:
+                    logger.debug("%s not in %s. deferring event", self.hostname, self._slurmctld.config.path)
+                    event.defer()
+                    return
 
         try:
             self._slurmctld.munge.service.restart()
@@ -643,9 +654,9 @@ class SlurmctldCharm(CharmBase):
         #     return False
 
         try:
-            status = "Active" if self.get_activate_instance() == self.hostname else "Backup"
+            status = self.get_controller_status(self.hostname)
         except Exception as e:
-            logger.warning("failed to query controller active status. reason %s", e)
+            logger.warning("failed to query controller active status. reason: %s", e)
             status = ""
 
         self.unit.status = ActiveStatus(status)
@@ -662,11 +673,14 @@ class SlurmctldCharm(CharmBase):
                     from_file = hosts
         from_peer = self._slurmctld_peer.controllers
 
+        logger.debug("controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer)
+
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
         current_controllers = [c for c in from_file if c in from_peer] + \
                               [c for c in from_peer if c not in from_file]
 
+        logger.debug("current controllers: %s", current_controllers)
         return current_controllers
 
     def get_munge_key(self) -> Optional[str]:
@@ -677,36 +691,35 @@ class SlurmctldCharm(CharmBase):
         """Get the stored jwt_rsa key."""
         return str(self._slurmctld.jwt.get())
 
-    def get_activate_instance(self) -> str:
-        """Return the hostname of the active controller instance. Return empty string if no controllers are active."""
+    def get_controller_status(self, hostname : str) -> str:
+        """Return the status of the given controller instance, e.g. 'primary - UP'"""
         # Example snippet of ping output:
         #   "pings": [
         #     {
         #       "hostname": "juju-829e74-84",
         #       "pinged": "DOWN",
-        #       "latency": 1850,
+        #       "latency": 123,
         #       "mode": "primary"
         #     },
         #     {
         #       "hostname": "juju-829e74-85",
         #       "pinged": "UP",
-        #       "latency": 1278,
+        #       "latency": 456,
         #       "mode": "backup1"
         #     },
         #     {
         #       "hostname": "juju-829e74-86",
         #       "pinged": "UP",
-        #       "latency": 984,
+        #       "latency": 789,
         #       "mode": "backup2"
         #     }
         #   ],
         ping_output = json.loads(self._slurmctld.scontrol("ping", "--json"))
         logger.debug("scontrol ping output: %s", ping_output)
 
-        # Slurm fails over to controllers in order. Active instance is the first that is "UP".
-        for host in ping_output["pings"]:
-            if host["pinged"] == "UP":
-                return host["hostname"]
+        for ping in ping_output["pings"]:
+            if ping["hostname"] == hostname:
+                return f"{ping['mode']} - {ping['pinged']}"
 
         return ""
 
@@ -715,9 +728,23 @@ class SlurmctldCharm(CharmBase):
         self._slurmctld.scontrol("update", f"nodename={','.join(nodelist)}", "state=resume")
 
     @property
-    def cluster_name(self) -> Optional[str]:
-        """Return the cluster name."""
-        return self._slurmctld_peer.cluster_name
+    def cluster_name(self) -> str:
+        """Return the cluster name. Generates a new name if the cluster name has not been set."""
+        # Retrieve the cluster name from either charm config or slurm.conf if already set.
+        # Otherwise, generate a new random name.
+        if charm_config_cluster_name := str(self.config.get("cluster-name", "")):
+            logger.debug("retrieved cluster name: %s from charm config", charm_config_cluster_name)
+            return charm_config_cluster_name
+
+        if self._slurmctld.config.path.exists():
+            with self._slurmctld.config.edit() as config:
+                if config.cluster_name:
+                    logger.debug("retrieved cluster name: %s from slurm.conf", config.cluster_name)
+                    return config.cluster_name
+
+        new_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
+        logger.info("existing cluster name not found. generated new cluster name: %s", new_name)
+        return new_name
 
     @property
     def new_nodes(self) -> list:

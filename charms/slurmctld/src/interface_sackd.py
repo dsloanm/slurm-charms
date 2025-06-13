@@ -40,7 +40,7 @@ class Sackd(Object):
         event.relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "auth_key": self._charm.get_munge_key(),  # TODO: change this once munge is auth/slurm
-                "slurmctld_hosts": self._charm._slurmctld_peer.controllers,
+                "slurmctld_hosts": self._charm.get_controllers(),
             }
         )
 
