@@ -82,9 +82,7 @@ class SackdCharm(CharmBase):
         if (slurmctld_hosts := event.slurmctld_hosts) != self._stored.slurmctld_hosts:
             if slurmctld_hosts is not None:
                 # Add port number to each entry in comma-separated list of slurmctld hosts
-                self._sackd.config_server = ",".join(
-                    f"{host}:6817" for host in slurmctld_hosts
-                )
+                self._sackd.config_server = ",".join(f"{host}:6817" for host in slurmctld_hosts)
                 self._stored.slurmctld_hosts = slurmctld_hosts
                 logger.debug(f"slurmctld_hosts={slurmctld_hosts}")
             else:

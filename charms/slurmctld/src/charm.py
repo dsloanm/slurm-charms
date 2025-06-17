@@ -9,6 +9,7 @@ import logging
 import secrets
 import shlex
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -198,7 +199,7 @@ class SlurmctldCharm(CharmBase):
             if not self._slurmctld.jwt.path.exists():
                 self._slurmctld.jwt.generate()
             self._on_write_slurm_conf(event)
-        # Peers defer until leader writes out keys and configuration files
+        # In an HA setup, peers defer until leader writes out keys and configuration files
         else:
             if not self._slurmctld.config.path.exists():
                 logger.debug("%s not found. deferring event", self._slurmctld.config.path)
@@ -206,11 +207,17 @@ class SlurmctldCharm(CharmBase):
                 return
 
             with self._slurmctld.config.edit() as config:
-                logger.debug("checking for %s in slurmctld_hosts: %s", self.hostname, config.slurmctld_host)
-                if self.hostname in config.slurmctld_host:
-                    logger.debug("found %s in slurm.conf. setting controller ready", self.hostname)
-                else:
-                    logger.debug("%s not in %s. deferring event", self.hostname, self._slurmctld.config.path)
+                logger.debug(
+                    "checking for %s in slurmctld_hosts: %s",
+                    self.hostname,
+                    config.slurmctld_host,
+                )
+                if self.hostname not in config.slurmctld_host:
+                    logger.debug(
+                        "%s not in %s. deferring event",
+                        self.hostname,
+                        self._slurmctld.config.path,
+                    )
                     event.defer()
                     return
 
@@ -268,15 +275,22 @@ class SlurmctldCharm(CharmBase):
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
 
-    def _on_slurmctld_changed(self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]) -> None:
+    def _on_slurmctld_changed(
+        self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
+    ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
         if not self._check_status():
-            logger.debug("attempted slurmctld relation change while unit is not ready. deferring event")
+            logger.debug(
+                "attempted slurmctld relation change while unit is not ready. deferring event"
+            )
             event.defer()
             return
 
-        # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
+        # Only slurm.conf update needed.
+        # New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
+        self._slurmctld_peer.clear_controller_changes()
+
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
 
@@ -599,7 +613,7 @@ class SlurmctldCharm(CharmBase):
 
         slurm_conf = SlurmConfig(
             ClusterName=self.cluster_name,
-            SlurmctldHost=self.get_controllers(),
+            SlurmctldHost=self._assemble_controllers(),
             SlurmctldParameters=_assemble_slurmctld_parameters(),
             ProctrackType="proctrack/linuxproc" if is_container() else "proctrack/cgroup",
             TaskPlugin=["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
@@ -684,26 +698,49 @@ class SlurmctldCharm(CharmBase):
         self.unit.status = ActiveStatus(status)
         return True
 
-    def get_controllers(self) -> list[str]:
-        """Get hostnames for all controllers."""
-        # Read the current list of controllers from the slurm.conf file and compare with the controllers currently in the peer relation.
-        # File ordering must be preserved as it dictates which slurmctld instance is the primary and which are backups.
+    def _assemble_controllers(self) -> list[str]:
+        """Get current list of controllers from slurm.conf and reconcile with joining and departing controllers."""
+        # Ordering must be preserved as it dictates which slurmctld instance is the primary and which are backups in an HA setup.
         from_file = []
         if self._slurmctld.config.path.exists():
             with self._slurmctld.config.edit() as config:
-                if (hosts := config.slurmctld_host):
+                if hosts := config.slurmctld_host:
                     from_file = hosts
-        from_peer = self._slurmctld_peer.controllers
 
-        logger.debug("controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer)
+        # The slurm.conf file uses hostnames while the joining and departing lists are IP addresses.
+        # Resolve IPs to (short) hostnames.
+        joining, departing = self._slurmctld_peer.get_controller_changes()
+        joining_hosts = [self._get_short_hostname_from_ip(ip) for ip in joining]
+        departing_hosts = [self._get_short_hostname_from_ip(ip) for ip in departing]
 
-        # Controllers in the file but not the peer relation have departed.
-        # Controllers in the peer relation but not the file are newly added.
-        current_controllers = [c for c in from_file if c in from_peer] + \
-                              [c for c in from_peer if c not in from_file]
+        logger.debug("controllers in slurm.conf: %s, joining: %s, departing: %s", from_file, joining_hosts, departing_hosts)
 
-        logger.debug("current controllers: %s", current_controllers)
-        return current_controllers
+        # Removing departing hosts from slurm.conf.
+        current = [c for c in from_file if c and c not in departing_hosts]
+
+        # Add joining hosts to slurm.conf if not already present.
+        # Ignore host if it is in both joining and departing lists.
+        new = [c for c in joining_hosts if c and c not in current and c not in departing_hosts]
+
+        return current + new
+
+    def _get_short_hostname_from_ip(self, ip_address: str) -> Optional[str]:
+        """Performs reverse DNS lookup and returns the short hostname."""
+        # e.g. 10.210.110.19 -> juju-28cdd8-12.lxd -> juju-28cdd8-12.
+        # TODO: confirm this works as expected on other clouds.
+        try:
+            hostname, _, _ = socket.gethostbyaddr(ip_address)
+            return hostname.split(".")[0]
+        except Exception as e:
+            logger.warning("error resolving IP %s. reason: %s", ip_address, e)
+            return None
+
+    def get_controllers(self) -> list[str]:
+        """Get hostnames for all controllers from slurm.conf."""
+        if self._slurmctld.config.path.exists():
+            with self._slurmctld.config.edit() as config:
+                return config.slurmctld_host or []
+        return []
 
     def get_munge_key(self) -> Optional[str]:
         """Get the stored munge key."""
@@ -713,8 +750,8 @@ class SlurmctldCharm(CharmBase):
         """Get the stored jwt_rsa key."""
         return str(self._slurmctld.jwt.get())
 
-    def get_controller_status(self, hostname : str) -> str:
-        """Return the status of the given controller instance, e.g. 'primary - UP'"""
+    def get_controller_status(self, hostname: str) -> str:
+        """Return the status of the given controller instance, e.g. 'primary - UP'."""
         # Example snippet of ping output:
         #   "pings": [
         #     {

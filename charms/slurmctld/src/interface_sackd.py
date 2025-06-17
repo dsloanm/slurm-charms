@@ -33,7 +33,9 @@ class Sackd(Object):
             return
 
         if not self._charm._check_status():
-            logger.debug("attempted sackd relation-created while unit is not ready. deferring event")
+            logger.debug(
+                "attempted sackd relation-created while unit is not ready. deferring event"
+            )
             event.defer()
             return
 

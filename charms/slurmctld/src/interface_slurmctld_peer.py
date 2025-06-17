@@ -11,9 +11,11 @@ from ops import (
     EventSource,
     Object,
     ObjectEvents,
+    RelationBrokenEvent,
     RelationChangedEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
+    RelationJoinedEvent,
 )
 
 logger = logging.getLogger()
@@ -59,12 +61,20 @@ class SlurmctldPeer(Object):
             self._on_relation_created,
         )
         self.framework.observe(
+            self._charm.on[self._relation_name].relation_joined,
+            self._on_relation_joined,
+        )
+        self.framework.observe(
             self._charm.on[self._relation_name].relation_changed,
             self._on_relation_changed,
         )
         self.framework.observe(
             self._charm.on[self._relation_name].relation_departed,
             self._on_relation_departed,
+        )
+        self.framework.observe(
+            self._charm.on[self._relation_name].relation_broken,
+            self._on_relation_broken,
         )
 
     @property
@@ -75,23 +85,40 @@ class SlurmctldPeer(Object):
         raise SlurmctldPeerError("attempted to access peer relation before it was established")
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
-        self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
-
         if not self._charm.unit.is_leader():
             return
 
-        # TODO: Remove everything below this line once rebased on auth/slurm.
-        # Can occur if all other slurmctld instances are down and a new one is added.
-        # The new unit is elected leader as it is starting and clears any existing cluster_info if this check is not in place.
+        # TODO: Remove everything auth_key related once rebased on auth/slurm.
+        # "cluster_info" can already be in the relation if a new unit is elected leader as it is starting,
+        # e.g. if all other slurmctld instances are down and a new one is added.
+        address = self._charm._ingress_address
         if "cluster_info" in self._relation.data[self.model.app]:
-            logger.debug("cluster_info already exists in peer relation. skipping initialization")
+            logger.debug(
+                "cluster_info already exists in peer relation. updating with self: %s", address
+            )
+            cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+            cluster_info["new_controllers"] = cluster_info.get("new_controllers", []) + [address]
+            self._relation.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
             return
 
         self._relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "auth_key": self._charm.get_munge_key(),
+                "new_controllers": [address],
             }
         )
+
+        logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
+
+    def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
+        if not self._charm.unit.is_leader():
+            return
+
+        # New controllers are added to peer relation to be picked up next time slurm.conf is written.
+        address = self._relation.data[event.unit]["ingress-address"]
+        cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+        cluster_info["new_controllers"] = cluster_info.get("new_controllers", []) + [address]
+        self._relation.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
 
         logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
 
@@ -99,18 +126,6 @@ class SlurmctldPeer(Object):
         if self._charm.unit.is_leader():
             self.on.slurmctld_available.emit()
             return
-
-        # In an HA setup, peers wait for the leader to add their hostname to slurm.conf before
-        # flagging themselves ready.
-        # Check if path exists first to avoid peer creating a blank slurm.conf on edit.
-        # TODO: what if leader is partially through a write to slurm.conf and we read a malformed file? try/except: defer()?
-        logger.debug("checking if slurm.conf contains hostname of this peer")
-        if self._charm._slurmctld.config.path.exists():
-            with self._charm._slurmctld.config.edit() as config:
-                logger.debug("checking for %s in slurmctld_hosts: %s", self._charm.hostname, config.slurmctld_host)
-                if self._charm.hostname in config.slurmctld_host:
-                    logger.debug("found this peer in slurm.conf. setting controller ready")
-                    self._charm._stored.controller_ready = True
 
         # TODO: remove this once rebased with auth/slurm changes.
         if cluster_info := self._relation.data[self.model.app].get("cluster_info"):
@@ -123,18 +138,39 @@ class SlurmctldPeer(Object):
         if not self._charm.unit.is_leader():
             return
 
-        self.on.slurmctld_departed.emit()
+        # Departing controllers are added to peer relation to be picked up next time slurm.conf is written.
+        address = self._relation.data[event.unit]["ingress-address"]
+        cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+        cluster_info["departing_controllers"] = cluster_info.get("departing_controllers", []) + [
+            address
+        ]
+        self._relation.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
+
+        logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
+
+    def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Clear the cluster info if the relation is broken."""
+        if self.framework.model.unit.is_leader():
+            event.relation.data[self.model.app]["cluster_info"] = ""
 
     def _property_get(self, info_name, property_name) -> str:
         """Return the property from app relation data."""
         info = json.loads(self._relation.data[self.model.app][info_name])
         return info.get(property_name, "")
 
-    @property
-    def controllers(self) -> list:
-        """Return the list of controllers."""
-        logger.debug("gathering controller hostnames from peer relation: %s with values: %s", self._relation.data, self._relation.data.values())
-        return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
+    def get_controller_changes(self):
+        """Return both the list of newly joining controllers and the list of departing controllers."""
+        cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+        return cluster_info.get("new_controllers", []), cluster_info.get(
+            "departing_controllers", []
+        )
+
+    def clear_controller_changes(self):
+        """Clear lists of new and departing controllers."""
+        cluster_info = json.loads(self._relation.data[self.model.app]["cluster_info"])
+        cluster_info.pop("new_controllers", None)
+        cluster_info.pop("departing_controllers", None)
+        self._relation.data[self.model.app]["cluster_info"] = json.dumps(cluster_info)
 
     @property
     def auth_key(self) -> str:
