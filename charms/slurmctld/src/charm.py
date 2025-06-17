@@ -503,7 +503,7 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
-        num_units = self._slurmctld_peer._relation.units
+        num_units = len(self._slurmctld_peer._relation.units)
         planned_units = self.model.app.planned_units()-1
         if num_units != planned_units:
             logger.debug("seen only %s slurmctld units of planned %s. deferring event", num_units, planned_units)
