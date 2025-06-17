@@ -80,6 +80,7 @@ class SlurmctldPeer(Object):
         if not self._charm.unit.is_leader():
             return
 
+        # TODO: Remove everything below this line once rebased on auth/slurm.
         # Can occur if all other slurmctld instances are down and a new one is added.
         # The new unit is elected leader as it is starting and clears any existing cluster_info if this check is not in place.
         if "cluster_info" in self._relation.data[self.model.app]:
@@ -132,6 +133,7 @@ class SlurmctldPeer(Object):
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
+        logger.debug("gathering controller hostnames from peer relation: %s with values: %s", self._relation.data, self._relation.data.values())
         return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
 
     @property

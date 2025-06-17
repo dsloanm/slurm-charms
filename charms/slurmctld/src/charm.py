@@ -28,6 +28,7 @@ from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
     SlurmctldDepartedEvent,
     SlurmctldPeer,
+    SlurmctldPeerError,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -132,9 +133,16 @@ class SlurmctldCharm(CharmBase):
             ]
 
             if self.unit.is_leader():
-                # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
-                #  Use Juju Secrets instead of StoredState for exchanging keys between units.
-                self._slurmctld.munge.key.generate()
+                # Auth key can already be in the relation if this is a new unit that is elected
+                # leader while being added to an existing deployment, e.g. in an HA setup while all
+                # other units are down.
+                try:
+                    self._slurmctld.munge.key.set(self._slurmctld_peer.auth_key)
+                    logger.debug("using existing auth key from peer relation")
+                except SlurmctldPeerError:
+                    # TODO: https://github.com/charmed-hpc/slurm-charms/issues/38 -
+                    #  Use Juju Secrets instead of StoredState for exchanging keys between units.
+                    self._slurmctld.munge.key.generate()
 
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
@@ -186,8 +194,12 @@ class SlurmctldCharm(CharmBase):
         if self.config.get("use-network-state"):
             self._configure_checkpoint_mount(event)
 
-        # Peers defer until leader writes out configuration file(s)
-        if not self.unit.is_leader():
+        if self.unit.is_leader():
+            if not self._slurmctld.jwt.path.exists():
+                self._slurmctld.jwt.generate()
+            self._on_write_slurm_conf(event)
+        # Peers defer until leader writes out keys and configuration files
+        else:
             if not self._slurmctld.config.path.exists():
                 logger.debug("%s not found. deferring event", self._slurmctld.config.path)
                 event.defer()
@@ -202,14 +214,13 @@ class SlurmctldCharm(CharmBase):
                     event.defer()
                     return
 
+            if not self._slurmctld.jwt.path.exists():
+                logger.debug("JWT key %s not found. deferring event", self._slurmctld.jwt.path)
+                event.defer()
+                return
+
         try:
             self._slurmctld.munge.service.restart()
-
-            if self.unit.is_leader():
-                if not self._slurmctld.jwt.path.exists():
-                    self._slurmctld.jwt.generate()
-                self._on_write_slurm_conf(event)
-
             self._slurmctld.service.enable()
             self._slurmctld.service.restart()
             self._slurmctld.exporter.service.enable()
@@ -259,6 +270,11 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmctld_changed(self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
+        if not self._check_status():
+            logger.debug("attempted slurmctld relation change while unit is not ready. deferring event")
+            event.defer()
+            return
+
         # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
@@ -368,6 +384,11 @@ class SlurmctldCharm(CharmBase):
             Instead, rewrite full gres.conf with data from remaining units.
         """
         if not self.unit.is_leader():
+            return
+
+        if not self._check_status():
+            logger.debug("slurmd departing while unit is not ready. deferring event")
+            event.defer()
             return
 
         # Reconcile the new_nodes.
@@ -632,6 +653,7 @@ class SlurmctldCharm(CharmBase):
         This charm needs these conditions to be satisfied in order to be ready:
         - Slurmctld component installed
         - Munge running
+        - If using network storage, it must be mounted
         """
         if self.config.get("use-network-state"):
             state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
