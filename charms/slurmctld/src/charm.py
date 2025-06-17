@@ -503,6 +503,13 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
+        num_units = self._slurmctld_peer._relation.units
+        planned_units = self.model.app.planned_units()-1
+        if num_units != planned_units:
+            logger.debug("seen only %s slurmctld units of planned %s. deferring event", num_units, planned_units)
+            event.defer()
+            return
+
         if slurm_config := self._assemble_slurm_conf():
             self._slurmctld.service.stop()
 
@@ -709,6 +716,9 @@ class SlurmctldCharm(CharmBase):
 
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
+        # URGENT TODO: we cannot assume controllers in the file but not the peer relation have departed!
+        # To be confirmed but seems like a unit cannot see its peers until after a relation-joined event.
+        # So if a unit joins an application and is immediately elected leader, this will delete all units that the new leader hasn't relation-joined yet.
         current_controllers = [c for c in from_file if c in from_peer] + [
             c for c in from_peer if c not in from_file
         ]

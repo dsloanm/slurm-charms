@@ -11,6 +11,7 @@ from ops import (
     EventSource,
     Object,
     ObjectEvents,
+    RelationBrokenEvent,
     RelationChangedEvent,
     RelationCreatedEvent,
     RelationDepartedEvent,
@@ -80,9 +81,9 @@ class SlurmctldPeer(Object):
         if not self._charm.unit.is_leader():
             return
 
-        # TODO: Remove everything below this line once rebased on auth/slurm.
-        # Can occur if all other slurmctld instances are down and a new one is added.
-        # The new unit is elected leader as it is starting and clears any existing cluster_info if this check is not in place.
+        # TODO: Remove everything auth_key related once rebased on auth/slurm.
+        # "cluster_info" can already be in the relation if a new unit is elected leader as it is starting,
+        # e.g. if all other slurmctld instances are down and a new one is added.
         if "cluster_info" in self._relation.data[self.model.app]:
             logger.debug("cluster_info already exists in peer relation. skipping initialization")
             return
@@ -96,25 +97,10 @@ class SlurmctldPeer(Object):
         logger.debug("cluster_info: %s", self._relation.data[self.model.app]["cluster_info"])
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-        if self._charm.unit.is_leader():
+        # Fire only once the leader unit has completed relation-joined for all units.
+        if self._charm.unit.is_leader() and len(self._relation.units) == self.model.app.planned_units()-1:
             self.on.slurmctld_available.emit()
             return
-
-        # In an HA setup, peers wait for the leader to add their hostname to slurm.conf before
-        # flagging themselves ready.
-        # Check if path exists first to avoid peer creating a blank slurm.conf on edit.
-        # TODO: what if leader is partially through a write to slurm.conf and we read a malformed file? try/except: defer()?
-        logger.debug("checking if slurm.conf contains hostname of this peer")
-        if self._charm._slurmctld.config.path.exists():
-            with self._charm._slurmctld.config.edit() as config:
-                logger.debug(
-                    "checking for %s in slurmctld_hosts: %s",
-                    self._charm.hostname,
-                    config.slurmctld_host,
-                )
-                if self._charm.hostname in config.slurmctld_host:
-                    logger.debug("found this peer in slurm.conf. setting controller ready")
-                    self._charm._stored.controller_ready = True
 
         # TODO: remove this once rebased with auth/slurm changes.
         if cluster_info := self._relation.data[self.model.app].get("cluster_info"):
@@ -124,10 +110,14 @@ class SlurmctldPeer(Object):
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handle hook when a unit departs."""
-        if not self._charm.unit.is_leader():
-            return
+        # Fire only once the leader unit has seen the last departing unit leave.
+        if self._charm.unit.is_leader() and len(self._relation.units) == self.model.app.planned_units()-1:
+            self.on.slurmctld_departed.emit()
 
-        self.on.slurmctld_departed.emit()
+    def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Clear the cluster info if the relation is broken."""
+        if self.framework.model.unit.is_leader():
+            event.relation.data[self.model.app]["cluster_info"] = ""
 
     def _property_get(self, info_name, property_name) -> str:
         """Return the property from app relation data."""
