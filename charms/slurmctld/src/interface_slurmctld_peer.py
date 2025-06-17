@@ -107,7 +107,11 @@ class SlurmctldPeer(Object):
         logger.debug("checking if slurm.conf contains hostname of this peer")
         if self._charm._slurmctld.config.path.exists():
             with self._charm._slurmctld.config.edit() as config:
-                logger.debug("checking for %s in slurmctld_hosts: %s", self._charm.hostname, config.slurmctld_host)
+                logger.debug(
+                    "checking for %s in slurmctld_hosts: %s",
+                    self._charm.hostname,
+                    config.slurmctld_host,
+                )
                 if self._charm.hostname in config.slurmctld_host:
                     logger.debug("found this peer in slurm.conf. setting controller ready")
                     self._charm._stored.controller_ready = True
@@ -133,7 +137,11 @@ class SlurmctldPeer(Object):
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
-        logger.debug("gathering controller hostnames from peer relation: %s with values: %s", self._relation.data, self._relation.data.values())
+        logger.debug(
+            "gathering controller hostnames from peer relation: %s with values: %s",
+            self._relation.data,
+            self._relation.data.values(),
+        )
         return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
 
     @property

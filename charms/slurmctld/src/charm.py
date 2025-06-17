@@ -198,7 +198,7 @@ class SlurmctldCharm(CharmBase):
             if not self._slurmctld.jwt.path.exists():
                 self._slurmctld.jwt.generate()
             self._on_write_slurm_conf(event)
-        # Peers defer until leader writes out keys and configuration files
+        # In an HA setup, peers defer until leader writes out keys and configuration files.
         else:
             if not self._slurmctld.config.path.exists():
                 logger.debug("%s not found. deferring event", self._slurmctld.config.path)
@@ -206,11 +206,15 @@ class SlurmctldCharm(CharmBase):
                 return
 
             with self._slurmctld.config.edit() as config:
-                logger.debug("checking for %s in slurmctld_hosts: %s", self.hostname, config.slurmctld_host)
+                logger.debug(
+                    "checking for %s in slurmctld_hosts: %s", self.hostname, config.slurmctld_host
+                )
                 if self.hostname in config.slurmctld_host:
                     logger.debug("found %s in slurm.conf. setting controller ready", self.hostname)
                 else:
-                    logger.debug("%s not in %s. deferring event", self.hostname, self._slurmctld.config.path)
+                    logger.debug(
+                        "%s not in %s. deferring event", self.hostname, self._slurmctld.config.path
+                    )
                     event.defer()
                     return
 
@@ -268,10 +272,14 @@ class SlurmctldCharm(CharmBase):
         """Show current slurm.conf."""
         event.set_results({"slurm.conf": str(self._slurmctld.config.load())})
 
-    def _on_slurmctld_changed(self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]) -> None:
+    def _on_slurmctld_changed(
+        self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
+    ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
         if not self._check_status():
-            logger.debug("attempted slurmctld relation change while unit is not ready. deferring event")
+            logger.debug(
+                "attempted slurmctld relation change while unit is not ready. deferring event"
+            )
             event.defer()
             return
 
@@ -691,16 +699,19 @@ class SlurmctldCharm(CharmBase):
         from_file = []
         if self._slurmctld.config.path.exists():
             with self._slurmctld.config.edit() as config:
-                if (hosts := config.slurmctld_host):
+                if hosts := config.slurmctld_host:
                     from_file = hosts
         from_peer = self._slurmctld_peer.controllers
 
-        logger.debug("controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer)
+        logger.debug(
+            "controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer
+        )
 
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
-        current_controllers = [c for c in from_file if c in from_peer] + \
-                              [c for c in from_peer if c not in from_file]
+        current_controllers = [c for c in from_file if c in from_peer] + [
+            c for c in from_peer if c not in from_file
+        ]
 
         logger.debug("current controllers: %s", current_controllers)
         return current_controllers
@@ -713,8 +724,8 @@ class SlurmctldCharm(CharmBase):
         """Get the stored jwt_rsa key."""
         return str(self._slurmctld.jwt.get())
 
-    def get_controller_status(self, hostname : str) -> str:
-        """Return the status of the given controller instance, e.g. 'primary - UP'"""
+    def get_controller_status(self, hostname: str) -> str:
+        """Return the status of the given controller instance, e.g. 'primary - UP'."""
         # Example snippet of ping output:
         #   "pings": [
         #     {
