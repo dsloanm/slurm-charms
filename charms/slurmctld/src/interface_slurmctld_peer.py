@@ -98,7 +98,7 @@ class SlurmctldPeer(Object):
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         # Fire only once the leader unit has completed relation-joined for all units.
-        if self._charm.unit.is_leader() and len(self._relation.units) == self.model.app.planned_units()-1:
+        if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_available.emit()
             return
 
@@ -111,7 +111,7 @@ class SlurmctldPeer(Object):
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handle hook when a unit departs."""
         # Fire only once the leader unit has seen the last departing unit leave.
-        if self._charm.unit.is_leader() and len(self._relation.units) == self.model.app.planned_units()-1:
+        if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_departed.emit()
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
@@ -124,14 +124,17 @@ class SlurmctldPeer(Object):
         info = json.loads(self._relation.data[self.model.app][info_name])
         return info.get(property_name, "")
 
+    def all_units_observed(self) -> bool:
+        """Return True if this unit has observed all other units in the peer relation. False otherwise."""
+        seen_units = len(self._relation.units)
+        planned_units = self.model.app.planned_units()-1 # -1 as includes self
+        logger.debug("seen %s slurmctld unit(s) of planned %s", seen_units, planned_units)
+        return seen_units == planned_units
+
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
-        logger.debug(
-            "gathering controller hostnames from peer relation: %s with values: %s",
-            self._relation.data,
-            self._relation.data.values(),
-        )
+        logger.debug("gathering controller hostnames from peer relation: %s", self._relation.data)
         return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
 
     @property

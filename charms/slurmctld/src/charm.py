@@ -498,15 +498,13 @@ class SlurmctldCharm(CharmBase):
         if not self.unit.is_leader():
             return
 
-        # If not ready, defer.
         if not self._check_status():
+            logger.debug("unit not ready. deferring event")
             event.defer()
             return
 
-        num_units = len(self._slurmctld_peer._relation.units)
-        planned_units = self.model.app.planned_units()-1
-        if num_units != planned_units:
-            logger.debug("seen only %s slurmctld units of planned %s. deferring event", num_units, planned_units)
+        if not self._slurmctld_peer.all_units_observed():
+            logger.debug("not observed all other units in the peer relation. deferring event")
             event.defer()
             return
 
