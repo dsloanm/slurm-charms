@@ -100,6 +100,11 @@ class Slurmd(Object):
             event.defer()
             return
 
+        if not self._charm.all_units_observed():
+            logger.debug("not observed all other controller units. deferring event")
+            event.defer()
+            return
+
         health_check_params = (
             self._charm.config.get("health-check-params")
             if len(self._charm.config.get("health-check-params")) > 0

@@ -6,7 +6,6 @@
 
 import json
 import logging
-import secrets
 import shlex
 import shutil
 import subprocess
@@ -17,7 +16,6 @@ from typing import Any, Dict, List, Optional, Union
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
-    CLUSTER_NAME_PREFIX,
     PEER_RELATION,
     PROMETHEUS_EXPORTER_PORT,
     SLURMCTLD_PORT,
@@ -31,7 +29,6 @@ from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
     SlurmctldDepartedEvent,
     SlurmctldPeer,
-    SlurmctldPeerError,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -169,28 +166,15 @@ class SlurmctldCharm(CharmBase):
             self._migrate_etc_data(etc_source, etc_target)
 
         if self.unit.is_leader():
-
-            if self._slurmctld_peer.cluster_name is None:
-                if (charm_config_cluster_name := str(self.config.get("cluster-name", ""))) != "":
-                    cluster_name = charm_config_cluster_name
-                else:
-                    cluster_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
-
-                logger.debug(f"Cluster Name: {cluster_name}")
-
-                try:
-                    self._slurmctld_peer.cluster_name = cluster_name
-                except SlurmctldPeerError as e:
-                    self.unit.status = BlockedStatus(e.message)
-                    logger.error(e.message)
-                    event.defer()
-                    return
-
             if not self._slurmctld.jwt.path.exists():
                 self._slurmctld.jwt.generate()
             if not self._slurmctld.key.path.exists():
                 self._slurmctld.key.generate()
+
             self._on_write_slurm_conf(event)
+            if event.deferred:
+                logger.debug("attempt to write slurm.conf deferred start event")
+                return
         else:
             # In an HA setup, peers defer until leader writes out keys and configuration files.
             if not self._peer_ready():
@@ -245,10 +229,10 @@ class SlurmctldCharm(CharmBase):
             logger.debug("%s not found", self._slurmctld.config.path)
             return False
 
-        with self._slurmctld.config.edit() as config:
-            if self.hostname not in config.slurmctld_host:
-                logger.debug("%s not in %s.", self.hostname, self._slurmctld.config.path)
-                return False
+        config = self._slurmctld.config.load()
+        if self.hostname not in config.slurmctld_host:
+            logger.debug("%s not in %s.", self.hostname, self._slurmctld.config.path)
+            return False
 
         if not self._slurmctld.key.path.exists():
             logger.debug("auth key %s not found", self._slurmctld.key.path)
@@ -302,6 +286,8 @@ class SlurmctldCharm(CharmBase):
         self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
     ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
+        # self.all_units_observed() check not needed as event is not emitted unless this is true
+
         if not self._check_status():
             logger.debug(
                 "attempted slurmctld relation change while unit is not ready. deferring event"
@@ -529,7 +515,7 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
-        if not self._slurmctld_peer.all_units_observed():
+        if not self.all_units_observed():
             logger.debug("not observed all other units in the peer relation. deferring event")
             event.defer()
             return
@@ -728,9 +714,9 @@ class SlurmctldCharm(CharmBase):
         # File ordering must be preserved as it dictates which slurmctld instance is the primary and which are backups.
         from_file = []
         if self._slurmctld.config.path.exists():
-            with self._slurmctld.config.edit() as config:
-                if hosts := config.slurmctld_host:
-                    from_file = hosts
+            config = self._slurmctld.config.load()
+            if config.slurmctld_host:
+                from_file = config.slurmctld_host
         from_peer = self._slurmctld_peer.controllers
 
         logger.debug(
@@ -750,11 +736,17 @@ class SlurmctldCharm(CharmBase):
 
     def get_auth_key(self) -> Optional[str]:
         """Get the current auth key."""
-        return str(self._slurmctld.key.get())
+        try:
+            return self._slurmctld.key.get()
+        except FileNotFoundError:
+            return None
 
     def get_jwt_rsa(self) -> Optional[str]:
         """Get the current jwt_rsa key."""
-        return str(self._slurmctld.jwt.get())
+        try:
+            return self._slurmctld.jwt.get()
+        except FileNotFoundError:
+            return None
 
     def get_controller_status(self, hostname: str) -> str:
         """Return the status of the given controller instance, e.g. 'primary - UP'."""
@@ -791,6 +783,10 @@ class SlurmctldCharm(CharmBase):
     def _resume_nodes(self, nodelist: List[str]) -> None:
         """Run scontrol to resume the specified node list."""
         self._slurmctld.scontrol("update", f"nodename={','.join(nodelist)}", "state=resume")
+
+    def all_units_observed(self):
+        """Return True if this unit has observed all other units in the peer relation. False otherwise."""
+        return self._slurmctld_peer.all_units_observed()
 
     @property
     def cluster_name(self) -> Optional[str]:

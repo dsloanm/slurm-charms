@@ -4,8 +4,10 @@
 """SlurmctldPeer."""
 
 import logging
+import secrets
 from typing import Optional
 
+from constants import CLUSTER_NAME_PREFIX
 from ops import (
     EventBase,
     EventSource,
@@ -76,6 +78,17 @@ class SlurmctldPeer(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
+        if not self._charm.unit.is_leader():
+            return
+
+        if self.cluster_name is None:
+            if (charm_config_cluster_name := self._charm.config.get("cluster-name", "")) != "":
+                cluster_name = charm_config_cluster_name
+            else:
+                cluster_name = f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
+
+            logger.debug(f"Cluster Name: {cluster_name}")
+            self.cluster_name = cluster_name
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         # Fire only once the leader unit has completed relation-joined for all units.

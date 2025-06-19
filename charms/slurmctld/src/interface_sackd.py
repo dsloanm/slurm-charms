@@ -37,6 +37,11 @@ class Sackd(Object):
             event.defer()
             return
 
+        if not self._charm.all_units_observed():
+            logger.debug("not observed all other controller units. deferring event")
+            event.defer()
+            return
+
         event.relation.data[self.model.app]["cluster_info"] = json.dumps(
             {
                 "auth_key": auth_key,
