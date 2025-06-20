@@ -220,7 +220,7 @@ class SlurmctldCharm(CharmBase):
             return True
 
         if not self.config.get("use-network-state"):
-            msg = "High availability of slurmctld requires application to have been deployed with `use-network-state` enabled."
+            msg = "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
             self.unit.status = BlockedStatus(msg)
             logger.warning(msg)
             return False

@@ -91,41 +91,49 @@ class SlurmctldPeer(Object):
             self.cluster_name = cluster_name
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
-        # Fire only once the leader unit has completed relation-joined for all units.
+        # Fire only once the leader unit has completed relation-joined for all units
         if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_available.emit()
             return
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Handle hook when a unit departs."""
-        # Fire only once the leader unit has seen the last departing unit leave.
+        # Fire only once the leader unit has seen the last departing unit leave
         if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_departed.emit()
 
     def all_units_observed(self) -> bool:
         """Return True if this unit has observed all other units in the peer relation. False otherwise."""
-        seen_units = len(self._relation.units)
+        try:
+            seen_units = len(self._relation.units)
+        except SlurmctldPeerError:
+            seen_units = 0
+
         planned_units = self.model.app.planned_units() - 1  # -1 as includes self
-        logger.debug("seen %s slurmctld unit(s) of planned %s", seen_units, planned_units)
+        logger.debug("seen %s other slurmctld unit(s) of planned %s", seen_units, planned_units)
         return seen_units == planned_units
 
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
-        logger.debug("gathering controller hostnames from peer relation: %s", self._relation.data)
-        return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
+        try:
+            logger.debug("gathering controller hostnames from peer relation: %s", self._relation.data)
+            return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
+        except SlurmctldPeerError:
+            # If the peer relation hasn't been established yet, the only hostname we know is our own
+            return [self._charm.hostname]
 
     @property
     def cluster_name(self) -> Optional[str]:
         """Return the cluster_name from app relation data."""
         cluster_name = None
-        if self._relation:
+        try:
             if cluster_name_from_relation := self._relation.data[self.model.app].get(
                 "cluster_name"
             ):
                 cluster_name = cluster_name_from_relation
             logger.debug(f"## `slurmctld-peer` relation available. cluster_name: {cluster_name}.")
-        else:
+        except SlurmctldPeerError:
             logger.debug(
                 "## `slurmctld-peer` relation not available yet, cannot get cluster_name."
             )
@@ -138,9 +146,8 @@ class SlurmctldPeer(Object):
             logger.debug("only leader can set the Slurm cluster name")
             return
 
-        if not self._relation:
-            raise SlurmctldPeerError(
-                "`slurmctld-peer` relation not available yet, cannot set cluster_name."
-            )
-
-        self._relation.data[self.model.app]["cluster_name"] = name
+        try:
+            self._relation.data[self.model.app]["cluster_name"] = name
+        except SlurmctldPeerError as e:
+            e.add_note("cannot set cluster_name")
+            raise
