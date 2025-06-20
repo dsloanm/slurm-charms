@@ -117,8 +117,12 @@ class SlurmctldPeer(Object):
     def controllers(self) -> list:
         """Return the list of controllers."""
         try:
-            logger.debug("gathering controller hostnames from peer relation: %s", self._relation.data)
-            return [data["hostname"] for data in self._relation.data.values() if "hostname" in data]
+            logger.debug(
+                "gathering controller hostnames from peer relation: %s", self._relation.data
+            )
+            return [
+                data["hostname"] for data in self._relation.data.values() if "hostname" in data
+            ]
         except SlurmctldPeerError:
             # If the peer relation hasn't been established yet, the only hostname we know is our own
             return [self._charm.hostname]

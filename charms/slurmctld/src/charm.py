@@ -144,11 +144,7 @@ class SlurmctldCharm(CharmBase):
 
         Notes:
             - The start hook can execute multiple times in a charms lifecycle,
-              for example, after a reboot of the underlying instance. This code safeguards
-              against the potentiality of changing the cluster_name in subsequent start hook
-              executions by applying logic that ensures the cluster_name is only set on the
-              first execution of this hook, we log and return on any subsequent start hook
-              event executions.
+              for example, after a reboot of the underlying instance.
         """
         if self.config.get("use-network-state"):
             state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
@@ -160,10 +156,19 @@ class SlurmctldCharm(CharmBase):
                 return
             shutil.chown(state_save_location, "slurm", "slurm")
 
-            # TODO: pull this from hpclibs? May be different for Slurm snap.
+            # TODO: pull this path from hpclibs? May be different for Slurm snap.
             etc_source = Path("/etc/slurm")
             etc_target = state_save_location / "etc-slurm"
-            self._migrate_etc_data(etc_source, etc_target)
+            try:
+                self._migrate_etc_data(etc_source, etc_target)
+            except Exception:
+                logger.exception(
+                    "failed to migrate slurm configuration from %s to %s. deferring event",
+                    etc_source,
+                    etc_target,
+                )
+                event.defer()
+                return
 
         if self.unit.is_leader():
             if not self._slurmctld.jwt.path.exists():
@@ -192,14 +197,24 @@ class SlurmctldCharm(CharmBase):
             logger.error(e.message)
             event.defer()
 
-    def _migrate_etc_data(self, etc_source, etc_target) -> None:
-        # In an HA setup, all instances require access to identical conf files.
-        # To accomplish this, the leader migrates /etc/slurm to the shared storage then everyone replaces their /etc/slurm with a symlink to the new location.
+    def _migrate_etc_data(self, etc_source: Path, etc_target: Path) -> None:
+        """Migrate the given source directory to the given target.
+
+        The charm leader recursively copies the source directory to the target.
+        All units then replace the source with a symlink to the target.
+
+        This is necessary in a high availability (HA) deployment as all slurmctld units require access to identical conf files.
+        For this reason, the target must be located on shared storage mounted on all slurmctld units.
+
+        To avoid data loss, the existing configuration is backed up to a directory suffixed by the current date and time before migration.
+        For example, `/etc/slurm_20250620_161437`.
+        """
+        # Nothing to do if target already correctly symlinked
         if etc_source.is_symlink() and etc_source.resolve() == etc_target:
             logger.debug("%s -> %s sylink already exists", etc_source, etc_target)
             return
 
-        if self.unit.is_leader() and not etc_target.exists() and etc_source.is_dir():
+        if self.unit.is_leader() and etc_source.is_dir() and not etc_target.exists():
             logger.debug("leader copying %s to %s", etc_source, etc_target)
             shutil.copytree(etc_source, etc_target)
 
@@ -216,6 +231,7 @@ class SlurmctldCharm(CharmBase):
         etc_source.symlink_to(etc_target)
 
     def _peer_ready(self) -> bool:
+        """Return True if all conditions are met to allow this peer to start. False otherwise."""
         if self.unit.is_leader():
             return True
 
@@ -230,7 +246,7 @@ class SlurmctldCharm(CharmBase):
             return False
 
         config = self._slurmctld.config.load()
-        if self.hostname not in config.slurmctld_host:
+        if self.hostname not in config.slurmctld_host:  # type: ignore
             logger.debug("%s not in %s.", self.hostname, self._slurmctld.config.path)
             return False
 
@@ -715,8 +731,8 @@ class SlurmctldCharm(CharmBase):
         from_file = []
         if self._slurmctld.config.path.exists():
             config = self._slurmctld.config.load()
-            if config.slurmctld_host:
-                from_file = config.slurmctld_host
+            if config.slurmctld_host:  # type: ignore
+                from_file = config.slurmctld_host  # type: ignore
         from_peer = self._slurmctld_peer.controllers
 
         logger.debug(

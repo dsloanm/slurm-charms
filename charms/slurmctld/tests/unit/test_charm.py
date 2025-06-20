@@ -57,7 +57,9 @@ class TestCharm(TestCase):
 
         self.assertEqual(
             self.harness.charm.unit.status,
-            BlockedStatus("High availability requires slurmctld to have been deployed with `use-network-state` enabled."),
+            BlockedStatus(
+                "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
+            ),
         )
 
     def test_cluster_name(self) -> None:
@@ -119,7 +121,9 @@ class TestCharm(TestCase):
         defer.assert_called()
         self.assertEqual(
             self.harness.charm.unit.status,
-            BlockedStatus("High availability requires slurmctld to have been deployed with `use-network-state` enabled."),
+            BlockedStatus(
+                "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
+            ),
         )
 
     @patch("ops.framework.EventBase.defer")
