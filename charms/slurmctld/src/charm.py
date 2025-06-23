@@ -73,7 +73,6 @@ class SlurmctldCharm(CharmBase):
             default_partition=str(),
             new_nodes=[],
             nhc_params=str(),
-            save_state_location=str(),
             slurm_installed=False,
             slurmdbd_host=str(),
             user_supplied_slurm_conf_params=str(),
