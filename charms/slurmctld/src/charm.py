@@ -182,7 +182,7 @@ class SlurmctldCharm(CharmBase):
         else:
             # In an HA setup, peers defer until leader writes out keys and configuration files.
             if not self._peer_ready():
-                logger.debug("peer not ready. deferring event", self._slurmctld.config.path)
+                logger.debug("peer not ready. deferring event")
                 event.defer()
                 return
 
