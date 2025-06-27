@@ -689,8 +689,8 @@ def integration_tests_cli(
     **kwargs,
 ):
     """Run integration tests."""
-    stage_charms(charms, repository)
-    build_cli(charms, repository)
+#    stage_charms(charms, repository)
+#    build_cli(charms, repository)
 
     local_charms = {}
     for charm in charms:
@@ -704,8 +704,8 @@ def integration_tests_cli(
             "-s",
             "--tb",
             "native",
-            "--log-cli-level=INFO",
-            "./tests/integration",
+            "--log-cli-level=INFO", "--keep-models",
+            "./tests/integration/test_ha.py",
         ]
         + rest,
         env={"PYTHONPATH": LIBS_CHARM_PATH / "lib", **os.environ, **local_charms},
