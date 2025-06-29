@@ -29,6 +29,7 @@ from interface_slurmctld_peer import (
     SlurmctldAvailableEvent,
     SlurmctldDepartedEvent,
     SlurmctldPeer,
+    SlurmctldPeerError,
 )
 from interface_slurmd import (
     PartitionAvailableEvent,
@@ -47,6 +48,7 @@ from ops import (
     CharmBase,
     ConfigChangedEvent,
     InstallEvent,
+    LeaderElectedEvent,
     StartEvent,
     StoredState,
     UpdateStatusEvent,
@@ -98,6 +100,7 @@ class SlurmctldCharm(CharmBase):
         event_handler_bindings = {
             self.on.install: self._on_install,
             self.on.start: self._on_start,
+            self.on.leader_elected: self._on_leader_elected,
             self.on.update_status: self._on_update_status,
             self.on.config_changed: self._on_config_changed,
             self._slurmctld_peer.on.slurmctld_available: self._on_slurmctld_changed,
@@ -259,6 +262,35 @@ class SlurmctldCharm(CharmBase):
 
         return True
 
+    def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
+        """Refresh config files on leader re-election."""
+        if not self.all_units_observed():
+            logger.debug("not all peers observed yet. deferring event")
+            event.defer()
+            return
+
+        try:
+            if not self._slurmctld_peer.leader_departed():
+                return
+        except SlurmctldPeerError:
+            logger.debug("failed to check leader_departed flag. deferring event")
+            event.defer()
+            return
+
+        self._on_write_slurm_conf(event)
+        self._sackd.update_controllers()
+        self._slurmd.update_controllers()
+
+        # TODO SHOULDNT BE NEEDED
+        #try:
+        #    self._slurmctld.service.restart()
+        #    self._slurmctld.scontrol("reconfigure")
+        #except SlurmOpsError as e:
+        #    logger.error(e)
+        #    return
+
+        self._check_status()
+
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
         charm_config_nhc_params = str(self.config.get("health-check-params", ""))
@@ -314,6 +346,7 @@ class SlurmctldCharm(CharmBase):
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
+        self._check_status()
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
@@ -507,6 +540,7 @@ class SlurmctldCharm(CharmBase):
             ConfigChangedEvent,
             InfluxDBAvailableEvent,
             InfluxDBUnavailableEvent,
+            LeaderElectedEvent,
             StartEvent,
             SlurmctldAvailableEvent,
             SlurmctldDepartedEvent,
@@ -523,15 +557,17 @@ class SlurmctldCharm(CharmBase):
 
         # Only the leader should write the config, restart, and scontrol reconf.
         if not self.unit.is_leader():
+            logger.warning("non-leader attempted to write slurm.conf")
+            return
+
+        if not self.all_units_observed():
+            logger.debug(
+                "not observed all other units in the peer relation. not writing slurm.conf"
+            )
             return
 
         if not self._check_status():
             logger.debug("unit not ready. deferring event")
-            event.defer()
-            return
-
-        if not self.all_units_observed():
-            logger.debug("not observed all other units in the peer relation. deferring event")
             event.defer()
             return
 

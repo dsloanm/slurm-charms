@@ -100,6 +100,16 @@ class SlurmctldPeer(Object):
         """Handle hook when a unit departs."""
         # Fire only once the leader unit has seen the last departing unit leave
         if self._charm.unit.is_leader() and self.all_units_observed():
+
+            if event.departing_unit == self._charm.unit:
+                logger.debug(
+                    "leader is departing. signal next elected leader to refresh controller config"
+                )
+                self._relation.data[self.model.app]["leader_departed"] = "True"
+                # Ensure this unit is not contactable by next elected leader's "scontrol reconfigure"
+                self._charm._slurmctld.service.stop()
+                return
+
             self.on.slurmctld_departed.emit()
 
     def all_units_observed(self) -> bool:
@@ -113,6 +123,16 @@ class SlurmctldPeer(Object):
         logger.debug("seen %s other slurmctld unit(s) of planned %s", seen_units, planned_units)
         return seen_units == planned_units
 
+    def leader_departed(self) -> bool:
+        """Return True if previous leader unit left the relation. False otherwise.
+
+        Note: clears the flag in the peer relation if True.
+        """
+        if "leader_departed" in self._relation.data[self.model.app]:
+            self._relation.data[self.model.app]["leader_departed"] = ""
+            return True
+        return False
+
     @property
     def controllers(self) -> list:
         """Return the list of controllers."""
@@ -124,8 +144,7 @@ class SlurmctldPeer(Object):
                 data["hostname"] for data in self._relation.data.values() if "hostname" in data
             ]
         except SlurmctldPeerError:
-            # If the peer relation hasn't been established yet, the only hostname we know is our own
-            return [self._charm.hostname]
+            return []
 
     @property
     def cluster_name(self) -> Optional[str]:

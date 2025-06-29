@@ -51,7 +51,9 @@ class Sackd(Object):
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Clear the cluster info if the relation is broken."""
-        if self.framework.model.unit.is_leader():
+        # Avoid cluster info being cleared in instance where leader unit is removed but other units
+        # remain by proceeding only if all units are departing/application is being scaled to 0.
+        if self.framework.model.unit.is_leader() and self.model.app.planned_units() == 0:
             event.relation.data[self.model.app]["cluster_info"] = ""
 
     def update_controllers(self) -> None:
