@@ -5,6 +5,7 @@
 
 import logging
 import secrets
+import time
 from typing import Optional
 
 from constants import CLUSTER_NAME_PREFIX
@@ -91,6 +92,20 @@ class SlurmctldPeer(Object):
             self.cluster_name = cluster_name
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
+        # Workaround for `scontrol reconfigure` not signalling slurmctld to reload slurm.conf.
+        # Use the peer relation to trigger a restart ourselves.
+        # Note: must be a restart. Reloading causes the slurmctld process to exit.
+        restart_signal = self._relation.data[self.model.app].get("restart_signal", "")
+        if restart_signal != self._charm._stored.last_restart_signal:
+            logger.debug("restart signal found. restarting slurmctld")
+            self._charm._stored.last_restart_signal = restart_signal
+
+            # Leader already restarted its service when writing out slurm.conf
+            if not self._charm.unit.is_leader():
+                self._charm._slurmctld.service.restart()
+
+            return
+
         # Fire only once the leader unit has completed relation-joined for all units
         if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_available.emit()
@@ -103,9 +118,8 @@ class SlurmctldPeer(Object):
 
             if event.departing_unit == self._charm.unit:
                 logger.debug(
-                    "leader is departing. signal next elected leader to refresh controller config"
+                    "leader is departing. next elected leader must refresh controller config"
                 )
-                self._relation.data[self.model.app]["leader_departed"] = "True"
                 # Ensure this unit is not contactable by next elected leader's "scontrol reconfigure"
                 self._charm._slurmctld.service.stop()
                 return
@@ -123,15 +137,19 @@ class SlurmctldPeer(Object):
         logger.debug("seen %s other slurmctld unit(s) of planned %s", seen_units, planned_units)
         return seen_units == planned_units
 
-    def leader_departed(self) -> bool:
-        """Return True if previous leader unit left the relation. False otherwise.
+    def signal_slurmctld_restart(self) -> None:
+        """Add a message to the peer relation to indicate all peer should restart slurmctld.service.
 
-        Note: clears the flag in the peer relation if True.
+        This is a workaround for `scontrol reconfigure` not instructing all slurmctld daemons to
+        re-read the config file in practice - a possible bug in Slurm.
         """
-        if "leader_departed" in self._relation.data[self.model.app]:
-            self._relation.data[self.model.app]["leader_departed"] = ""
-            return True
-        return False
+        if not self._charm.unit.is_leader():
+            logger.warning("non-leader attempted to signal a slurmctld restart across peers")
+            return
+
+        # Current timestamp used so a unique value is written to the relation on each call.
+        signal = str(time.time())
+        self._relation.data[self.model.app]["restart_signal"] = signal
 
     @property
     def controllers(self) -> list:

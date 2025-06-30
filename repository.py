@@ -689,8 +689,8 @@ def integration_tests_cli(
     **kwargs,
 ):
     """Run integration tests."""
-#    stage_charms(charms, repository)
-#    build_cli(charms, repository)
+    stage_charms(charms, repository)
+    build_cli(charms, repository)
 
     local_charms = {}
     for charm in charms:
