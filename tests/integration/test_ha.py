@@ -274,7 +274,10 @@ def test_slurmctld_scale_down(juju: jubilant.Juju) -> None:
 
     logger.info("removing backup1 controller")
     juju.remove_unit(controllers["backup1"]["unit"])
-    juju.wait(lambda status: len(status.apps[SLURMCTLD_APP_NAME].units) == 2 and jubilant.all_active(status, *SLURM_APPS))
+    juju.wait(
+        lambda status: len(status.apps[SLURMCTLD_APP_NAME].units) == 2
+        and jubilant.all_active(status, *SLURM_APPS)
+    )
 
     # Can take time for changes to propagate to login node. Retry if get stale controllers
     @tenacity.retry(
@@ -331,10 +334,7 @@ def test_slurmctld_service_failover(juju: jubilant.Juju) -> None:
     service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
     )
-    assert any(
-        "slurmctld: Running as primary controller" in line
-        for line in service_result.stdout.splitlines()[-5:]
-    )  # -5 to avoid checking log of previous tests
+    assert "slurmctld: Running as primary controller" in service_result.stdout
 
 
 @pytest.mark.order(5)
@@ -363,18 +363,12 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
     primary_service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
     )
-    assert any(
-        "slurmctld: Running as primary controller" in line
-        for line in primary_service_result.stdout.splitlines()[-5:]
-    )
+    assert "slurmctld: Running as primary controller" in primary_service_result.stdout
 
     backup_service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
     )
-    assert any(
-        "slurmctld: slurmctld running in background mode" in line
-        for line in backup_service_result.stdout.splitlines()[-5:]
-    )
+    assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
 
 
 @pytest.mark.order(6)
@@ -407,10 +401,7 @@ def test_slurmctld_unit_failover(juju: jubilant.Juju) -> None:
     service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
     )
-    assert any(
-        "slurmctld: Running as primary controller" in line
-        for line in service_result.stdout.splitlines()[-5:]
-    )
+    assert "slurmctld: Running as primary controller" in service_result.stdout
 
 
 @pytest.mark.order(7)
@@ -444,18 +435,12 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
     primary_service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
     )
-    assert any(
-        "slurmctld: Running as primary controller" in line
-        for line in primary_service_result.stdout.splitlines()[-5:]
-    )
+    assert "slurmctld: Running as primary controller" in primary_service_result.stdout
 
     backup_service_result = juju.exec(
         f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
     )
-    assert any(
-        "slurmctld: slurmctld running in background mode" in line
-        for line in backup_service_result.stdout.splitlines()[-5:]
-    )
+    assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
 
 
 @pytest.mark.order(8)
@@ -528,11 +513,13 @@ def test_slurmctld_remove_failed_controller(juju: jubilant.Juju) -> None:
             down.append(unit)
         else:
             not_down.append(unit)
-    assert len(down) == 1 and len(not_down) == 2, f"expected 1 down controller and 2 others, got {len(down)} down and {len(not_down)} others"
+    assert (
+        len(down) == 1 and len(not_down) == 2
+    ), f"expected 1 down controller and 2 others, got {len(down)} down and {len(not_down)} others"
 
     down_unit = down[0]
     logger.info("removing failed controller: '%s'", down_unit)
-    juju.remove_unit(down_unit, force=True) # force necessary for a failed unit
+    juju.remove_unit(down_unit, force=True)  # force necessary for a failed unit
     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS))
 
     @tenacity.retry(
@@ -583,7 +570,10 @@ def test_slurmctld_remove_leader(juju: jubilant.Juju) -> None:
 
     logger.info("removing leader controller")
     juju.remove_unit(controllers[leader]["unit"])
-    juju.wait(lambda status: len(status.apps[SLURMCTLD_APP_NAME].units) == 1 and jubilant.all_active(status, *SLURM_APPS))
+    juju.wait(
+        lambda status: len(status.apps[SLURMCTLD_APP_NAME].units) == 1
+        and jubilant.all_active(status, *SLURM_APPS)
+    )
 
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
@@ -630,6 +620,7 @@ def test_slurmctld_sackd_scale_up(juju: jubilant.Juju) -> None:
             "backup": "UP",
         },
     )
+
 
 # Unreliable test. Sometimes the cluster can be recovered by adding a unit but sometimes slurmd and
 # sackd experience DNS resolution issues for the downed controllers and fail to restart.
