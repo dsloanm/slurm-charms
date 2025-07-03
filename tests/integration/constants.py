@@ -31,3 +31,11 @@ SLURM_APPS = {
 
 MYSQL_APP_NAME = "mysql"
 INFLUXDB_APP_NAME = "influxdb"
+
+DEFAULT_FILESYSTEM_CHARM_CHANNEL = "latest/edge"
+MICROCEPH_APP_NAME = "microceph"
+CEPHFS_SERVER_PROXY_APP_NAME = "cephfs-server-proxy"
+FILESYSTEM_CLIENT_APP_NAME = "checkpoint"
+FILESYSTEM_CLIENT_MOUNTPOINT = "/var/lib/slurm/checkpoint"
+
+SLURM_WAIT_TIMEOUT = 1200
