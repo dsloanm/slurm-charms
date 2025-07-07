@@ -48,6 +48,7 @@ from ops import (
     ConfigChangedEvent,
     InstallEvent,
     LeaderElectedEvent,
+    MaintenanceStatus,
     StartEvent,
     StoredState,
     UpdateStatusEvent,
@@ -80,6 +81,7 @@ class SlurmctldCharm(CharmBase):
             acct_gather_params={},
             job_profiling_slurm_conf={},
             last_restart_signal=str(),
+            last_save_state_location=str(),
         )
 
         self._slurmctld = SlurmctldManager(snap=False)
@@ -131,6 +133,12 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-limits",
             ]
 
+            if self.unit.is_leader():
+                if not self._slurmctld.jwt.path.exists():
+                    self._slurmctld.jwt.generate()
+                if not self._slurmctld.key.path.exists():
+                    self._slurmctld.key.generate()
+
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
         except SlurmOpsError as e:
@@ -143,21 +151,20 @@ class SlurmctldCharm(CharmBase):
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Refresh config files on leader re-election."""
-        if not self.config.get("use-network-state"):
-            logger.debug("not in HA configuration. skipping event")
+        if not (checkpoint_data := self._slurmctld_peer.checkpoint_data):
+            logger.debug("checkpoint data not set. skipping event")
             return
 
-        if not self.all_units_observed():
-            logger.debug("not all peers observed yet. deferring event")
-            event.defer()
-            return
-
-        state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+        state_save_location = Path(checkpoint_data["StateSaveLocation"])
         if not state_save_location.is_mount():
-            logger.debug("%s not yet mounted. skipping event", state_save_location)
+            logger.debug("%s not a mounted file system. skipping event", state_save_location)
             return
 
         self._on_write_slurm_conf(event)
+        if event.deferred:
+            logger.debug("attempt to write slurm.conf deferred event")
+            return
+
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
         self._check_status()
@@ -169,56 +176,82 @@ class SlurmctldCharm(CharmBase):
             - The start hook can execute multiple times in a charms lifecycle,
               for example, after a reboot of the underlying instance.
         """
-        if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-            if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(
-                    f"waiting for {state_save_location} to be mounted"
-                )
-                event.defer()
-                return
-            shutil.chown(state_save_location, "slurm", "slurm")
+        self._on_write_slurm_conf(event)
+        if event.deferred:
+            logger.debug("attempt to write slurm.conf deferred event")
+            return
 
-            # Move config data to network storage
-            etc_source = Path("/etc/slurm")
-            etc_target = state_save_location / "etc-slurm"
-            try:
-                self._migrate_etc_data(etc_source, etc_target)
-            except Exception:
-                logger.exception(
-                    "failed to migrate slurm configuration from %s to %s. deferring event",
-                    etc_source,
-                    etc_target,
-                )
-                event.defer()
-                return
-
-        if self.unit.is_leader():
-            if not self._slurmctld.jwt.path.exists():
-                self._slurmctld.jwt.generate()
-            if not self._slurmctld.key.path.exists():
-                self._slurmctld.key.generate()
-
-            self._on_write_slurm_conf(event)
-            if event.deferred:
-                logger.debug("attempt to write slurm.conf deferred start event")
-                return
-        else:
-            # In an HA setup, peers defer until leader writes out keys and configuration files.
-            if not self._peer_ready():
-                logger.debug("peer not ready. deferring event")
-                event.defer()
-                return
+        if not self._check_status():
+            logger.debug("unit not ready. deferring event")
+            event.defer()
+            return
 
         try:
             self._slurmctld.service.enable()
             self._slurmctld.service.restart()
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
-            self._check_status()
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
+
+    def _migrate_state_save_location(self, event: ActionEvent) -> None:
+        """Migrate StateSaveLocation to specified directory."""
+        if not self.unit.is_leader():
+            logger.debug("storage mounted. re-emitting deferred events")
+            self.framework.reemit()
+            return
+
+        if not (checkpoint_data := self._slurmctld_peer.checkpoint_data):
+            logger.debug("checkpoint data not set. deferring event")
+            event.defer()
+            return
+
+        path_from_filesystem_client = "/" # TODO: GET FROM FILESYSTEM-CLIENT RELATION
+        source = checkpoint_data["StateSaveLocation"]
+        destination = Path(path_from_filesystem_client+"/")
+
+        # TODO: maybe need to add /checkpoint on the end?
+        if source == destination:
+            logger.warning("state save location is already %s. aborting migration", destination)
+            return
+
+        # JWT key is in the checkpoint directory but requires separate configuration
+        jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+        relative = jwt_key_path.relative_to(source)
+        jwt_key_path = destination / relative
+        checkpoint_data["AuthAltParameters"]["jwt_key"] = jwt_key_path
+        checkpoint_data["StateSaveLocation"] = destination
+
+        status_message = f"migrating {source} to {destination}"
+        logger.debug(status_message)
+        self.unit.status = MaintenanceStatus(status_message)
+
+        # Perform initial copy of data while slurmctld.service is still running then stop and sync
+        # the delta
+        rsync_cmd = f"/usr/bin/rsync --archive --delete {source} {destination}"
+        try:
+            subprocess.check_output(rsync_cmd.split())
+        except subprocess.CalledProcessError:
+            logger.exception("failed initial sync of %s to %s", source, destination)
+            event.defer()
+            return
+
+        self._slurmctld.service.stop()
+
+        try:
+            subprocess.check_output(rsync_cmd.split())
+        except subprocess.CalledProcessError:
+            logger.exception("failed delta sync of %s to %s", source, destination)
+            self._slurmctld.service.start()
+            event.defer()
+            return
+
+        # Only update configs to the new path if sync is successful
+        self.set_jwt_path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+        self._slurmctld_peer.checkpoint_data = checkpoint_data
+        # slurmctld.service is restarted by _on_write_slurm_conf()
+        self._on_write_slurm_conf(event)
 
     def _migrate_etc_data(self, etc_source: Path, etc_target: Path) -> None:
         """Migrate the given source directory to the given target.
@@ -252,36 +285,6 @@ class SlurmctldCharm(CharmBase):
 
         logger.debug("symlinking %s to %s", etc_source, etc_target)
         etc_source.symlink_to(etc_target)
-
-    def _peer_ready(self) -> bool:
-        """Return True if all conditions are met to allow this peer to start. False otherwise."""
-        if self.unit.is_leader():
-            return True
-
-        if not self.config.get("use-network-state"):
-            msg = "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
-            self.unit.status = BlockedStatus(msg)
-            logger.warning(msg)
-            return False
-
-        if not self._slurmctld.config.path.exists():
-            logger.debug("%s not found", self._slurmctld.config.path)
-            return False
-
-        config = self._slurmctld.config.load()
-        if self.hostname not in config.slurmctld_host:  # type: ignore
-            logger.debug("%s not in %s.", self.hostname, self._slurmctld.config.path)
-            return False
-
-        if not self._slurmctld.key.path.exists():
-            logger.debug("auth key %s not found", self._slurmctld.key.path)
-            return False
-
-        if not self._slurmctld.jwt.path.exists():
-            logger.debug("JWT key %s not found", self._slurmctld.jwt.path)
-            return False
-
-        return True
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
@@ -591,7 +594,8 @@ class SlurmctldCharm(CharmBase):
                 logger.error(e)
                 return
 
-            # In an HA setup, signal all other slurmctld instances to restart and reload slurm.conf.
+            # In an HA setup, signal all other slurmctld instances to restart and reload
+            # SlurmctldHosts from slurm.conf.
             # Workaround for `scontrol reconfigure` not instructing this.
             self._slurmctld_peer.signal_slurmctld_restart()
 
@@ -667,11 +671,15 @@ class SlurmctldCharm(CharmBase):
             profiling_parameters = self._assemble_profiling_params()
             logger.debug(f"## profiling_params: {profiling_parameters}")
 
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+
         slurm_conf = SlurmConfig.from_dict(
             {
                 "ClusterName": self.cluster_name,
                 "SlurmctldHost": self.get_controllers(),
                 "SlurmctldParameters": _assemble_slurmctld_parameters(),
+                "AuthAltParameters": checkpoint_data["AuthAltParameters"] if checkpoint_data else None,
+                "StateSaveLocation": checkpoint_data["StateSaveLocation"] if checkpoint_data else None,
                 "ProctrackType": "proctrack/linuxproc" if is_container() else "proctrack/cgroup",
                 "TaskPlugin": (
                     ["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"]
@@ -724,15 +732,26 @@ class SlurmctldCharm(CharmBase):
         """Check for all relations and set appropriate status.
 
         This charm needs these conditions to be satisfied in order to be ready:
+        - Checkpoint data set
+        - If non-leader, high availability shared file system mounted
         - Slurmctld component installed
         - Cluster name set
-        - If using network storage, it is mounted
+        - JWT key path matches peer relation
+        - slurm.conf exists
+        - slurm.conf includes this unit's hostname
+        - slurm.conf StateSaveLocation matches peer relation
+        - auth key exists
+        - JWT key exists
         """
-        if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
+        if not (checkpoint_data := self._slurmctld_peer.checkpoint_data):
+            self.unit.status = MaintenanceStatus("waiting for checkpoint_data")
+            return False
+
+        if not self.unit.is_leader():
+            state_save_location = Path(checkpoint_data["StateSaveLocation"])
             if not state_save_location.is_mount():
                 self.unit.status = BlockedStatus(
-                    f"waiting for {state_save_location} to be mounted"
+                    f"a shared file system must be provided to enable slurmctld high availability"
                 )
                 return False
 
@@ -743,7 +762,32 @@ class SlurmctldCharm(CharmBase):
             return False
 
         if self.cluster_name is None:
-            self.unit.status = WaitingStatus("Waiting for cluster_name....")
+            self.unit.status = MaintenanceStatus("waiting for cluster_name")
+            return False
+
+        if checkpoint_data["AuthAltParameters"]["jwt_key"] !=  self._slurmctld.jwt.path:
+            self.unit.status = MaintenanceStatus(f"waiting for StateSaveLocation migration to update JWT key path")
+            return False
+
+        if not self._slurmctld.config.path.exists():
+            self.unit.status = MaintenanceStatus(f"waiting for {self._slurmctld.config.path} generation")
+            return False
+
+        config = self._slurmctld.config.load()
+        if self.hostname not in config.slurmctld_host:  # type: ignore
+            self.unit.status = MaintenanceStatus(f"waiting for {self.hostname} to be added to {self._slurmctld.config.path}")
+            return False
+
+        if checkpoint_data["StateSaveLocation"] != config.state_save_location: # type: ignore
+            self.unit.status = MaintenanceStatus(f"waiting for StateSaveLocation migration to update slurm.conf")
+            return False
+
+        if not self._slurmctld.key.path.exists():
+            self.unit.status = MaintenanceStatus(f"waiting for {self._slurmctld.key.path} generation")
+            return False
+
+        if not self._slurmctld.jwt.path.exists():
+            self.unit.status = MaintenanceStatus(f"waiting for {self._slurmctld.jwt.path} generation")
             return False
 
         try:
@@ -794,6 +838,11 @@ class SlurmctldCharm(CharmBase):
             return self._slurmctld.jwt.get()
         except FileNotFoundError:
             return None
+
+    def set_jwt_path(self, keyfile: Path):
+        """Set the current jwt_rsa key file to the given path."""
+        # TODO: need a public interface for this
+        self._slurmctld.jwt._keyfile = keyfile
 
     def get_controller_status(self, hostname: str) -> str:
         """Return the status of the given controller instance, e.g. 'primary - UP'."""

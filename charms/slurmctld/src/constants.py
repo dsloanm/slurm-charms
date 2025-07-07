@@ -18,7 +18,6 @@ CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS = {
 }
 
 CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
-    "AuthAltParameters": {"jwt_key": "/var/lib/slurm/checkpoint/jwt_hs256.key"},
     "AuthAltTypes": ["auth/jwt"],
     "AuthType": "auth/slurm",
     "CredType": "auth/slurm",
@@ -33,7 +32,6 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "SelectTypeParameters": "CR_CPU_Memory",
     "SlurmctldPort": f"{SLURMCTLD_PORT}",
     "SlurmdPort": "6818",
-    "StateSaveLocation": "/var/lib/slurm/checkpoint",
     "SlurmdSpoolDir": "/var/lib/slurm/slurmd",
     "SlurmctldLogFile": "/var/log/slurm/slurmctld.log",
     "SlurmdLogFile": "/var/log/slurm/slurmd.log",
@@ -42,4 +40,9 @@ CHARM_MAINTAINED_SLURM_CONF_PARAMETERS = {
     "SlurmUser": "slurm",
     "SlurmdUser": "root",
     "RebootProgram": "/usr/sbin/reboot --reboot",
+}
+
+DEFAULT_SLURM_CONF_PARAMETERS = {
+    "AuthAltParameters": {"jwt_key": "/var/lib/slurm/checkpoint/jwt_hs256.key"},
+    "StateSaveLocation": "/var/lib/slurm/checkpoint",
 }
