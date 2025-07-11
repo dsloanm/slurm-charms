@@ -80,6 +80,7 @@ class SlurmctldPeer(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
+
         if not self._charm.unit.is_leader():
             return
 
@@ -110,16 +111,22 @@ class SlurmctldPeer(Object):
 
             # Restart could be from a StateSaveLocation migration
             if checkpoint_data := self.checkpoint_data:
-                current_keypath = self._charm._slurmctld.jwt.path
-                latest_keypath = checkpoint_data["AuthAltParameters"]["jwt_key"]
+                last_path = self._charm._stored.last_state_save_location
+                current_path = checkpoint_data["StateSaveLocation"]
 
-                if current_keypath != latest_keypath:
-                    self._charm.set_jwt_path(latest_keypath)
-                    logger.debug("StateSaveLocation migration occurred. jwt key path set to %s", latest_keypath)
+                if current_path != last_path:
+                    logger.debug(
+                        "StateSaveLocation migration occurred. path was %s now %s",
+                        last_path,
+                        current_path,
+                    )
+                    self._charm.set_jwt_path(checkpoint_data["AuthAltParameters"]["jwt_key"])
 
             # Leader already restarted its service when writing out slurm.conf
             if not self._charm.unit.is_leader():
-                self.on.start.emit()
+                self._charm.on.start.emit()
+                # TODO: sometimes get "Skipping notice (SlurmctldCharm/on/start[62]/SlurmctldCharm/_on_start) - already in the queue."
+                # Can we emit() if not in the queue and reemit() if it is?
 
             return
 
@@ -190,9 +197,7 @@ class SlurmctldPeer(Object):
                 cluster_name = cluster_name_from_relation
             logger.debug("retrieved cluster_name '%s' from peer relation", cluster_name)
         except SlurmctldPeerError:
-            logger.debug(
-                "peer relation not available yet, cannot get cluster_name."
-            )
+            logger.debug("peer relation not available yet, cannot get cluster_name.")
         return cluster_name
 
     @cluster_name.setter
@@ -217,11 +222,12 @@ class SlurmctldPeer(Object):
                 "checkpoint_data"
             ):
                 checkpoint_data = json.loads(checkpoint_data_from_relation)
-            logger.debug("retrieved checkpoint_data: %s from peer relation", )
-        except SlurmctldPeerError:
             logger.debug(
-                "peer relation not available yet, cannot get checkpoint_data."
+                "retrieved checkpoint_data: %s from peer relation",
+                checkpoint_data,
             )
+        except SlurmctldPeerError:
+            logger.debug("peer relation not available yet, cannot get checkpoint_data.")
         return checkpoint_data
 
     @checkpoint_data.setter

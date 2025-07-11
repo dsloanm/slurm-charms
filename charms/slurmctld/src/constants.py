@@ -6,6 +6,9 @@
 SLURMCTLD_PORT = 6817
 PROMETHEUS_EXPORTER_PORT = 9092
 
+HA_MOUNT_POINT = "/mnt/slurmctld-statefs"
+HA_MOUNT_RELATION = "mount"
+
 PEER_RELATION = "slurmctld-peer"
 
 CLUSTER_NAME_PREFIX = "charmed-hpc"
