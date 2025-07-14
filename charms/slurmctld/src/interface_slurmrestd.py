@@ -57,7 +57,8 @@ class Slurmrestd(Object):
         if not self.framework.model.unit.is_leader():
             return
 
-        if not (auth_key := self._charm.get_auth_key()):
+        auth_key = self._charm.get_auth_key()
+        if not auth_key:
             logger.debug("auth key not yet available. deferring event")
             event.defer()
             return

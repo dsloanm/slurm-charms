@@ -77,9 +77,9 @@ class Slurmdbd(Object):
             return
 
         # Defer if keys not yet available.
-        if not (auth_key := self._charm.get_auth_key()) or not (
-            jwt_rsa := self._charm.get_jwt_rsa()
-        ):
+        auth_key = self._charm.get_auth_key()
+        jwt_rsa = self._charm.get_jwt_rsa()
+        if not auth_key or not jwt_rsa:
             logger.debug("auth and JWT keys not yet available. deferring event")
             event.defer()
             return

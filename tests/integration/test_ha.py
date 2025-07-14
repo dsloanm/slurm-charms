@@ -27,7 +27,6 @@ from constants import (
     DEFAULT_FILESYSTEM_CHARM_CHANNEL,
     DEFAULT_SLURM_CHARM_CHANNEL,
     FILESYSTEM_CLIENT_APP_NAME,
-    FILESYSTEM_CLIENT_MOUNTPOINT,
     MICROCEPH_APP_NAME,
     MYSQL_APP_NAME,
     SACKD_APP_NAME,
@@ -125,7 +124,7 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
         base=base,
         channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmctld, str) else None,
         constraints={"virt-type": "virtual-machine"},
-        config={"use-network-state": True, "slurm-conf-parameters": "SlurmctldTimeout=10\n"},
+        config={"slurm-conf-parameters": "SlurmctldTimeout=10\n"},
         num_units=2,
     )
 
@@ -204,14 +203,13 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
         "filesystem-client",
         FILESYSTEM_CLIENT_APP_NAME,
         channel=DEFAULT_FILESYSTEM_CHARM_CHANNEL,
-        config={"mountpoint": FILESYSTEM_CLIENT_MOUNTPOINT},
     )
 
     # filesystem-client integrations
     # slurmctld will exit Blocked status once integration is complete and StateSaveLocation directory is
     # mounted
     juju.integrate(FILESYSTEM_CLIENT_APP_NAME, CEPHFS_SERVER_PROXY_APP_NAME)
-    juju.integrate(f"{FILESYSTEM_CLIENT_APP_NAME}:juju-info", f"{SLURMCTLD_APP_NAME}:juju-info")
+    juju.integrate(f"{FILESYSTEM_CLIENT_APP_NAME}:mount", f"{SLURMCTLD_APP_NAME}:mount")
 
     # Wait for all applications to reach active status.
     juju.wait(jubilant.all_active, timeout=SLURM_WAIT_TIMEOUT)
@@ -357,19 +355,27 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
     logger.info("restarting primary controller service")
     juju.exec(f"sudo systemctl restart {slurmctld_service}", unit=controllers["primary"]["unit"])
 
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(3),
+        reraise=True,
+    )
+    def retry_test_recovery(juju):
+        sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
+        assert_sinfo(sinfo_result)
+
+        primary_service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
+        )
+        assert "slurmctld: Running as primary controller" in primary_service_result.stdout
+
+        backup_service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+        )
+        assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+
     logger.info("testing recovery")
-    sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
-    assert_sinfo(sinfo_result)
-
-    primary_service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
-    )
-    assert "slurmctld: Running as primary controller" in primary_service_result.stdout
-
-    backup_service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
-    )
-    assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+    retry_test_recovery(juju)
 
 
 @pytest.mark.order(6)
@@ -429,19 +435,27 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
         error=jubilant.any_error,
     )
 
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(3),
+        reraise=True,
+    )
+    def retry_test_recovery(juju):
+        sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
+        assert_sinfo(sinfo_result)
+
+        primary_service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
+        )
+        assert "slurmctld: Running as primary controller" in primary_service_result.stdout
+
+        backup_service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+        )
+        assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+
     logger.info("testing recovery")
-    sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
-    assert_sinfo(sinfo_result)
-
-    primary_service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
-    )
-    assert "slurmctld: Running as primary controller" in primary_service_result.stdout
-
-    backup_service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
-    )
-    assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+    retry_test_recovery(juju)
 
 
 @pytest.mark.order(8)

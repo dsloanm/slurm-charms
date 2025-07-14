@@ -75,6 +75,7 @@ external-libraries = [
     { lib = "operator-libs-linux.juju_systemd_notices", version = "0.2" },
     { lib = "data-platform-libs.data_interfaces", version = "0.41" },
     { lib = "grafana-agent.cos_agent", version = "0.20" },
+    { lib = "filesystem-client.mount_info", version = "0.1" },
 ]
 binary-packages = [
     "pydantic-core",

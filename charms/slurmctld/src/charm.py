@@ -154,10 +154,12 @@ class SlurmctldCharm(CharmBase):
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Refresh config files on leader re-election."""
-        if not (checkpoint_data := self._slurmctld_peer.checkpoint_data):
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+        if not checkpoint_data:
             logger.debug("checkpoint data not set. skipping event")
             return
 
+        # Refresh config only if in an HA setup with a shared SaveStateLocation
         state_save_location = Path(checkpoint_data["StateSaveLocation"])
         if not state_save_location.is_mount():
             logger.debug("%s is not a mounted file system. skipping event", state_save_location)
@@ -258,20 +260,27 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
-        if self.unit.is_leader():
-            if self._check_status():
-                if self._stored.slurmdbd_host != "":
-                    self._slurmrestd.set_slurm_config_on_app_relation_data(
-                        str(self._slurmctld.config.load()),
-                    )
-                    return
-                else:
-                    logger.debug("Need slurmdbd for slurmrestd relation.")
-                    event.defer()
-                    return
-            else:
-                logger.debug("Cluster not ready yet, deferring event.")
-                event.defer()
+        if not self.unit.is_leader():
+            return
+
+        if not self._check_status():
+            logger.debug("cluster not ready yet. deferring event")
+            event.defer()
+            return
+
+        if self._stored.slurmdbd_host == "":
+            logger.debug("need slurmdbd for slurmrestd relation")
+            event.defer()
+            return
+
+        if not self._slurmctld.config.path.exists():
+            logger.debug("slurm.conf does not exist. deferring event")
+            event.defer()
+            return
+
+        self._slurmrestd.set_slurm_config_on_app_relation_data(
+            str(self._slurmctld.config.load()),
+        )
 
     def _on_slurmdbd_available(self, event: SlurmdbdAvailableEvent) -> None:
         self._stored.slurmdbd_host = event.slurmdbd_host
@@ -359,14 +368,13 @@ class SlurmctldCharm(CharmBase):
             Lack of map between departing unit and NodeName complicates removal of node from gres.conf.
             Instead, rewrite full gres.conf with data from remaining units.
         """
-        if not self.unit.is_leader():
+        if not self.all_units_observed():
+            logger.debug("slurmd departing while application is scaling. deferring event")
+            event.defer()
             return
 
-        # TODO: double check this isn't needed
-        # if not self._check_status():
-        #     logger.debug("slurmd departing while unit is not ready. deferring event")
-        #     event.defer()
-        #     return
+        if not self.unit.is_leader():
+            return
 
         # Reconcile the new_nodes.
         new_nodes = self.new_nodes
@@ -769,8 +777,15 @@ class SlurmctldCharm(CharmBase):
 
     def get_jwt_rsa(self) -> Optional[str]:
         """Get the current jwt_rsa key."""
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+        if not checkpoint_data:
+            return None
+
         try:
-            return self._slurmctld.jwt.get()
+            # TODO: mutable JWT path in hpclibs
+            # return self._slurmctld.jwt.get()
+            jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+            return jwt_key_path.read_text()
         except FileNotFoundError:
             return None
 
