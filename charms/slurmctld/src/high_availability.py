@@ -76,7 +76,7 @@ class SlurmctldHA(Object):
         # JWT key requires separate handling - it may be in the state directory
         jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
         if jwt_key_path.is_relative_to(state_save_source):
-            # Example:
+            # Given:
             #
             # jwt_key_path      = /var/lib/slurm/checkpoint/jwt_hs256.key
             # state_save_source = /var/lib/slurm/checkpoint
@@ -114,6 +114,8 @@ class SlurmctldHA(Object):
 
         To avoid data loss, the existing configuration is backed up to a directory suffixed by the current date and time before migration.
         For example, `/etc/slurm_20250620_161437`.
+
+        TODO: google docstring style
         """
         # Nothing to do if target already correctly symlinked
         if source.is_symlink() and source.resolve() == target:

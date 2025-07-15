@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Slurm charm integration tests."""
+"""Slurm charm high availability tests."""
 
 import json
 import logging
@@ -28,17 +28,15 @@ from constants import (
     DEFAULT_SLURM_CHARM_CHANNEL,
     FILESYSTEM_CLIENT_APP_NAME,
     MICROCEPH_APP_NAME,
-    MYSQL_APP_NAME,
     SACKD_APP_NAME,
     SLURM_APPS,
     SLURM_WAIT_TIMEOUT,
     SLURMCTLD_APP_NAME,
     SLURMD_APP_NAME,
-    SLURMDBD_APP_NAME,
-    SLURMRESTD_APP_NAME,
 )
 
 logger = logging.getLogger(__name__)
+pytestmark = pytest.mark.highavailability
 
 
 def assert_pinged(controllers: dict, expected_statuses: dict):
@@ -106,9 +104,9 @@ def _get_slurm_controllers(juju: jubilant.Juju, query_unit: str = f"{SACKD_APP_N
     return slurm_controllers
 
 
-@pytest.mark.order(1)
-def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, slurmrestd) -> None:
-    """Test if the Slurm charms can successfully reach active status."""
+@pytest.mark.order(12)
+def test_slurmctld_ha_deploy(juju: jubilant.Juju) -> None:
+    """Test deployment of high availability file system and migration of StateSaveLocation data."""
     # Ceph shared storage necessary for all controller instances to share StateSaveLocation data
     juju.deploy(
         "microceph",
@@ -116,60 +114,17 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
         constraints={"mem": "4G", "root-disk": "20G", "virt-type": "virtual-machine"},
         storage={"osd-standalone": "loop,2G,3"},
     )
-
-    # Deploy 2 slurmctld controllers in HA configuration
     juju.deploy(
-        slurmctld,
-        SLURMCTLD_APP_NAME,
-        base=base,
-        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmctld, str) else None,
-        constraints={"virt-type": "virtual-machine"},
-        config={"slurm-conf-parameters": "SlurmctldTimeout=10\n"},
-        num_units=2,
+        "filesystem-client",
+        FILESYSTEM_CLIENT_APP_NAME,
+        channel=DEFAULT_FILESYSTEM_CHARM_CHANNEL,
     )
 
-    # Deploy remaining Slurm and auxiliary services
-    juju.deploy(
-        sackd,
-        SACKD_APP_NAME,
-        base=base,
-        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(sackd, str) else None,
-    )
-    juju.deploy(
-        slurmd,
-        SLURMD_APP_NAME,
-        base=base,
-        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmd, str) else None,
-    )
-    juju.deploy(
-        slurmdbd,
-        SLURMDBD_APP_NAME,
-        base=base,
-        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmdbd, str) else None,
-    )
-    juju.deploy(
-        slurmrestd,
-        SLURMRESTD_APP_NAME,
-        base=base,
-        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmrestd, str) else None,
-    )
-    juju.deploy("mysql", MYSQL_APP_NAME)
-
-    # Integrate applications together
-    # Applications are not usable until filesystem-client is later integrated with slurmctld
-    juju.integrate(SACKD_APP_NAME, SLURMCTLD_APP_NAME)
-    juju.integrate(SLURMD_APP_NAME, SLURMCTLD_APP_NAME)
-    juju.integrate(SLURMDBD_APP_NAME, SLURMCTLD_APP_NAME)
-    juju.integrate(SLURMRESTD_APP_NAME, SLURMCTLD_APP_NAME)
-    juju.integrate(MYSQL_APP_NAME, SLURMDBD_APP_NAME)
-
-    # Must wait for Microceph to become active before CephFS and filesystem-client can be set up
-    juju.wait(
-        lambda status: jubilant.all_active(status, "microceph"),
-        error=jubilant.any_error,
-    )
+    # Must wait for Microceph to become active before CephFS and proxy can be set up
+    juju.wait(lambda status: jubilant.all_active(status, "microceph"))
 
     # Set up CephFS
+    # TODO: replace with charm following https://github.com/canonical/ceph-charms/pull/93
     microceph_unit = f"{MICROCEPH_APP_NAME}/0"
     cephfs_setup = [
         "microceph.ceph osd pool create cephfs_data",
@@ -180,7 +135,7 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
     for cmd in cephfs_setup:
         juju.exec(cmd, unit=microceph_unit)
 
-    # Gather necessary config from microceph to set up filesystem charms
+    # Gather config from microceph to set up proxy
     microceph_host = juju.exec("hostname -I", unit=microceph_unit).stdout.strip()
     microceph_fsid = juju.exec(
         "microceph.ceph -s -f json | jq -r '.fsid'", unit=microceph_unit
@@ -199,52 +154,33 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
             "auth-info": f"fs-client:{microceph_key}",
         },
     )
-    juju.deploy(
-        "filesystem-client",
-        FILESYSTEM_CLIENT_APP_NAME,
-        channel=DEFAULT_FILESYSTEM_CHARM_CHANNEL,
-    )
 
-    # filesystem-client integrations
-    # slurmctld will exit Blocked status once integration is complete and StateSaveLocation directory is
-    # mounted
+    logger.info("integrating file system and controller")
     juju.integrate(FILESYSTEM_CLIENT_APP_NAME, CEPHFS_SERVER_PROXY_APP_NAME)
     juju.integrate(f"{FILESYSTEM_CLIENT_APP_NAME}:mount", f"{SLURMCTLD_APP_NAME}:mount")
-
-    # Wait for all applications to reach active status.
     juju.wait(jubilant.all_active, timeout=SLURM_WAIT_TIMEOUT)
 
-
-@pytest.mark.order(2)
-def test_slurmctld_scale_up(juju: jubilant.Juju) -> None:
-    """Test scaling up slurmctld by one unit."""
     controllers = _get_slurm_controllers(juju)
-    logger.info("checking primary and backup controllers")
-    assert_pinged(
-        controllers,
-        {
-            "primary": "UP",
-            "backup": "UP",
-        },
-    )
+    logger.info("checking primary controller")
+    assert_pinged(controllers, {"primary": "UP"})
 
-    logger.info("adding controller")
-    juju.add_unit(SLURMCTLD_APP_NAME)
-    # All Slurm apps must be waited for to allow new controller hostname to propagate
+
+@pytest.mark.order(13)
+def test_slurmctld_scale_up(juju: jubilant.Juju) -> None:
+    """Test scaling up slurmctld by two units."""
+    controllers = _get_slurm_controllers(juju)
+    logger.info("checking primary controller")
+    assert_pinged(controllers, {"primary": "UP"})
+
+    logger.info("adding controllers")
+    juju.add_unit(SLURMCTLD_APP_NAME, num_units=2)
+    # All Slurm apps must be waited for to allow new controller hostnames to propagate
     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
 
-    # Failover order of existing controllers must not have changed
-    # New unit must be the lowest priority backup
+    # Primary controller must not have changed. New units must be backups
     new_controllers = _get_slurm_controllers(juju)
     assert len(new_controllers) == 3, f"expected 3 controllers, got {len(new_controllers)}"
-    assert_hostname(
-        new_controllers,
-        controllers,
-        {
-            "primary": "primary",
-            "backup1": "backup",
-        },
-    )
+    assert_hostname(new_controllers, controllers, {"primary": "primary"})
     assert_pinged(
         new_controllers,
         {
@@ -255,7 +191,7 @@ def test_slurmctld_scale_up(juju: jubilant.Juju) -> None:
     )
 
 
-@pytest.mark.order(3)
+@pytest.mark.order(14)
 def test_slurmctld_scale_down(juju: jubilant.Juju) -> None:
     """Test scaling down slurmctld by one unit."""
     controllers = _get_slurm_controllers(juju)
@@ -307,7 +243,7 @@ def test_slurmctld_scale_down(juju: jubilant.Juju) -> None:
     )
 
 
-@pytest.mark.order(4)
+@pytest.mark.order(15)
 def test_slurmctld_service_failover(juju: jubilant.Juju) -> None:
     """Test failover to backup slurmctld after stopping primary service."""
     login_unit = f"{SACKD_APP_NAME}/0"
@@ -336,7 +272,7 @@ def test_slurmctld_service_failover(juju: jubilant.Juju) -> None:
     assert "slurmctld: Running as primary controller" in service_result.stdout
 
 
-@pytest.mark.order(5)
+@pytest.mark.order(16)
 def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
     """Test primary resumes control after restarting service."""
     login_unit = f"{SACKD_APP_NAME}/0"
@@ -378,10 +314,11 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
     retry_test_recovery(juju)
 
 
-@pytest.mark.order(6)
+@pytest.mark.order(17)
 def test_slurmctld_unit_failover(juju: jubilant.Juju) -> None:
     """Test backup takeover after powering off primary machine."""
     login_unit = f"{SACKD_APP_NAME}/0"
+    compute_unit = f"{SLURMD_APP_NAME}/0"
     controllers = _get_slurm_controllers(juju)
     slurmctld_service = SLURM_APPS[SLURMCTLD_APP_NAME]
 
@@ -410,8 +347,13 @@ def test_slurmctld_unit_failover(juju: jubilant.Juju) -> None:
     )
     assert "slurmctld: Running as primary controller" in service_result.stdout
 
+    logger.info("testing job submission")
+    slurmd_result = juju.exec("hostname -s", unit=compute_unit)
+    sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} hostname -s", unit=login_unit)
+    assert sackd_result.stdout == slurmd_result.stdout
 
-@pytest.mark.order(7)
+
+@pytest.mark.order(18)
 def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
     """Test primary resumes control after restarting powered-off machine."""
     login_unit = f"{SACKD_APP_NAME}/0"
@@ -430,10 +372,7 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
 
     logger.info("rebooting primary machine")
     subprocess.check_output(["/usr/sbin/lxc", "start", controllers["primary"]["hostname"]])
-    juju.wait(
-        lambda status: jubilant.all_active(status, SLURMCTLD_APP_NAME),
-        error=jubilant.any_error,
-    )
+    juju.wait(lambda status: jubilant.all_active(status, SLURMCTLD_APP_NAME))
 
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
@@ -458,7 +397,7 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
     retry_test_recovery(juju)
 
 
-@pytest.mark.order(8)
+@pytest.mark.order(19)
 def test_slurmctld_scale_up_degraded(juju: jubilant.Juju) -> None:
     """Test scaling up slurmctld by one unit while primary unit failed."""
     controllers = _get_slurm_controllers(juju)
@@ -517,7 +456,7 @@ def test_slurmctld_scale_up_degraded(juju: jubilant.Juju) -> None:
     )
 
 
-@pytest.mark.order(9)
+@pytest.mark.order(20)
 def test_slurmctld_remove_failed_controller(juju: jubilant.Juju) -> None:
     """Test removing failed controller slurmctld unit."""
     status = juju.status()
@@ -557,7 +496,7 @@ def test_slurmctld_remove_failed_controller(juju: jubilant.Juju) -> None:
     )
 
 
-@pytest.mark.order(10)
+@pytest.mark.order(21)
 def test_slurmctld_remove_leader(juju: jubilant.Juju) -> None:
     """Test removing the leader slurmctld unit."""
     login_unit = f"{SACKD_APP_NAME}/0"
@@ -610,7 +549,7 @@ def test_slurmctld_remove_leader(juju: jubilant.Juju) -> None:
     assert_pinged(new_controllers, {"primary": "UP"})
 
 
-@pytest.mark.order(11)
+@pytest.mark.order(22)
 def test_slurmctld_sackd_scale_up(juju: jubilant.Juju) -> None:
     """Test scaling up slurmctld and sackd simultaneously."""
     new_login_unit = f"{SACKD_APP_NAME}/1"
@@ -635,3 +574,25 @@ def test_slurmctld_sackd_scale_up(juju: jubilant.Juju) -> None:
             "backup": "UP",
         },
     )
+
+
+@pytest.mark.order(23)
+def test_new_partition_deploy(juju: jubilant.Juju, base, slurmd) -> None:
+    """Test deploying a new partition in an HA setup."""
+    new_compute_application = "new-compute"
+    new_compute_unit = f"{new_compute_application}/0"
+
+    logger.info("adding new partition: %s", new_compute_application)
+    juju.deploy(
+        slurmd,
+        new_compute_application,
+        base=base,
+        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmd, str) else None,
+    )
+    juju.integrate(new_compute_application, SLURMCTLD_APP_NAME)
+    juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
+
+    logger.info("testing that the `node-configured` charm action makes node status 'idle'")
+    juju.run(new_compute_unit, "node-configured")
+    state = juju.exec(f"sinfo | grep {new_compute_application} | awk '{{print $5}}' | tr -d '\n'", unit=new_compute_unit)
+    assert state.stdout == "idle"

@@ -759,9 +759,8 @@ class SlurmctldCharm(CharmBase):
 
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
-        from_peer_set = set(from_peer)
         from_file_set = set(from_file)
-        current_controllers = [c for c in from_file if c in from_peer_set] + [
+        current_controllers = [c for c in from_file if c in from_peer] + [
             c for c in from_peer if c not in from_file_set
         ]
 

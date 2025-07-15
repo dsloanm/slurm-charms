@@ -96,6 +96,9 @@ source = ["charms", "*/_build"]
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
+markers = [
+    "highavailability: marks tests for slurmctld high availability",
+]
 
 # Spell checking tools configuration
 [tool.codespell]

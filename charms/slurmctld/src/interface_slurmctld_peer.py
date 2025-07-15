@@ -174,17 +174,25 @@ class SlurmctldPeer(Object):
         self._relation.data[self.model.app]["restart_signal"] = str(time.time())
 
     @property
-    def controllers(self) -> list:
-        """Return the list of controllers."""
+    def controllers(self) -> set[str]:
+        """Return controller hostnames from the peer relation.
+
+        Always includes the hostname of this unit, even when the peer relation is not established.
+        This ensures a valid controller is returned when integrations with other applications, such
+        as slurmd or sackd, occur first."""
+        controllers = {self._charm.hostname}
+
         try:
-            logger.debug(
-                "gathering controller hostnames from peer relation: %s", self._relation.data
-            )
-            return [
-                data["hostname"] for data in self._relation.data.values() if "hostname" in data
-            ]
+            logger.debug("Gathering controller hostnames from peer relation: %s", self._relation.data)
+            for data in self._relation.data.values():
+                hostname = data.get("hostname")
+                if hostname:
+                    controllers.add(hostname)
         except SlurmctldPeerError:
-            return []
+            logger.debug("peer relation not established")
+
+        logger.debug("returning controllers: %s", controllers)
+        return controllers
 
     @property
     def cluster_name(self) -> Optional[str]:

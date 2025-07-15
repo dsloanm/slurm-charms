@@ -21,10 +21,15 @@ import jubilant
 import pytest
 import tenacity
 from constants import (
+    CEPHFS_SERVER_PROXY_APP_NAME,
+    DEFAULT_FILESYSTEM_CHARM_CHANNEL,
     DEFAULT_SLURM_CHARM_CHANNEL,
+    FILESYSTEM_CLIENT_APP_NAME,
+    MICROCEPH_APP_NAME,
     MYSQL_APP_NAME,
     SACKD_APP_NAME,
     SLURM_APPS,
+    SLURM_WAIT_TIMEOUT,
     SLURMCTLD_APP_NAME,
     SLURMD_APP_NAME,
     SLURMDBD_APP_NAME,
@@ -44,11 +49,14 @@ def test_deploy(juju: jubilant.Juju, base, sackd, slurmctld, slurmd, slurmdbd, s
         base=base,
         channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(sackd, str) else None,
     )
+    # Controller uses a VM with low `SlurmctldTimeout` to facilitate HA tests
     juju.deploy(
         slurmctld,
         SLURMCTLD_APP_NAME,
         base=base,
         channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmctld, str) else None,
+        constraints={"virt-type": "virtual-machine"},
+        config={"slurm-conf-parameters": "SlurmctldTimeout=10\n"},
     )
     juju.deploy(
         slurmd,
