@@ -160,9 +160,10 @@ class SlurmctldCharm(CharmBase):
             return
 
         # Refresh config only if in an HA setup with a shared SaveStateLocation
-        state_save_location = Path(checkpoint_data["StateSaveLocation"])
-        if not state_save_location.is_mount():
-            logger.debug("%s is not a mounted file system. skipping event", state_save_location)
+        # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
+        state_save_parent = Path(checkpoint_data["StateSaveLocation"]).parent
+        if not state_save_parent.is_mount():
+            logger.debug("%s is not a mounted file system. skipping event", state_save_parent)
             return
 
         self._on_write_slurm_conf(event)
@@ -242,16 +243,6 @@ class SlurmctldCharm(CharmBase):
         self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
     ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # self.all_units_observed() check not needed as event is not emitted unless this is true
-
-        # TODO: double check this isn't needed
-        # if not self._check_status():
-        #     logger.debug(
-        #         "attempted slurmctld relation change while unit is not ready. deferring event"
-        #     )
-        #     event.defer()
-        #     return
-
         # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
@@ -373,6 +364,7 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
+        # Leader check after all_units_observed() as leader may have changed since event deferred
         if not self.unit.is_leader():
             return
 

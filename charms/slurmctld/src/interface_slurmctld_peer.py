@@ -124,9 +124,8 @@ class SlurmctldPeer(Object):
 
             # Leader already restarted its service when writing out slurm.conf
             if not self._charm.unit.is_leader():
+                # Emits if a start event is not already in the defer queue
                 self._charm.on.start.emit()
-                # TODO: sometimes get "Skipping notice (SlurmctldCharm/on/start[62]/SlurmctldCharm/_on_start) - already in the queue."
-                # Can we emit() if not in the queue and reemit() if it is?
 
             return
 
@@ -179,11 +178,14 @@ class SlurmctldPeer(Object):
 
         Always includes the hostname of this unit, even when the peer relation is not established.
         This ensures a valid controller is returned when integrations with other applications, such
-        as slurmd or sackd, occur first."""
+        as slurmd or sackd, occur first.
+        """
         controllers = {self._charm.hostname}
 
         try:
-            logger.debug("Gathering controller hostnames from peer relation: %s", self._relation.data)
+            logger.debug(
+                "Gathering controller hostnames from peer relation: %s", self._relation.data
+            )
             for data in self._relation.data.values():
                 hostname = data.get("hostname")
                 if hostname:

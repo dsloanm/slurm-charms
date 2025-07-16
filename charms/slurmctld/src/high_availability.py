@@ -104,18 +104,22 @@ class SlurmctldHA(Object):
         self._charm._check_status()
 
     def _migrate_etc_data(self, source: Path, target: Path) -> None:
-        """Migrate the given source directory to the given target.
+        """Migrate the given source etc directory to the given target.
 
         The charm leader recursively copies the source directory to the target.
         All units then replace the source with a symlink to the target.
 
-        This is necessary in a high availability (HA) deployment as all slurmctld units require access to identical conf files.
-        For this reason, the target must be located on shared storage mounted on all slurmctld units.
+        This is necessary in a high availability (HA) deployment as all slurmctld units require
+        access to identical conf files. For this reason, the target must be located on shared
+        storage mounted on all slurmctld units.
 
-        To avoid data loss, the existing configuration is backed up to a directory suffixed by the current date and time before migration.
-        For example, `/etc/slurm_20250620_161437`.
+        To avoid data loss, the existing configuration is backed up to a directory suffixed by the
+        current date and time before migration. For example, `/etc/slurm_20250620_161437`.
 
-        TODO: google docstring style
+        Args:
+            source: Path to the directory containing Slurm config files, e.g. `/etc/slurm`
+            target: Path to the directory Slurm config files are migrated to,
+                    e.g. `/mnt/slurmctld-statefs`
         """
         # Nothing to do if target already correctly symlinked
         if source.is_symlink() and source.resolve() == target:
@@ -149,7 +153,17 @@ class SlurmctldHA(Object):
         source.symlink_to(target)
 
     def _migrate_state_save_location_data(self, source: Path, target: Path):
-        """TODO: include `target` must be a parent directory e.g. `/mnt/slurmctld-statefs` and not `/mnt/slurmctld-statefs/checkpoint` or you get `/mnt/slurmctld-statefs/checkpoint/checkpoint`."""
+        """Migrate the given source StateSaveLocation directory to the given target.
+
+        Performs an initial `rsync` to the target while slurmctld.service is running.
+        Then stops the service and runs a second `rsync` to copy the delta.
+
+        Args:
+            source: Path to the directory containing StateSaveLocation data,
+                    e.g. `/var/lib/slurm/checkpoint`
+            target: Path to the *parent* directory the source is migrated to,
+                    e.g. `/mnt/slurmctld-statefs` to migrate to `/mnt/slurmctld-statefs/checkpoint`
+        """
         checkpoint_target = target / source.name
         if checkpoint_target.exists() and source == checkpoint_target:
             logger.warning(
