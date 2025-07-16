@@ -192,6 +192,12 @@ class SlurmctldCharm(CharmBase):
             event.defer()
             return
 
+        if not self.unit.is_leader():
+            if not self._peer_ready():
+                logger.debug("peer not ready. deferring event")
+                event.defer()
+                return
+
         try:
             self._slurmctld.service.enable()
             self._slurmctld.service.restart()
@@ -662,10 +668,6 @@ class SlurmctldCharm(CharmBase):
         if self.cluster_name is None:
             self.unit.status = MaintenanceStatus("waiting for cluster_name")
             return False
-
-        if not self.unit.is_leader():
-            if not self._peer_ready():
-                return False
 
         try:
             status = self.get_controller_status(self.hostname)
