@@ -47,9 +47,17 @@ class TestCharm(TestCase):
     @patch("charm.SlurmctldCharm._on_install")
     @patch("ops.framework.EventBase.defer")
     def test_slurmctld_status_in_start_hook_as_non_leader(self, defer, *_) -> None:
-        """Test that the correct status is set if you enter the start hook as a non-leader."""
-        self.harness.set_leader(False)
+        """Test that the correct status is set if you enter the start hook as a non-leader.
+
+        Notes:
+            The slurmctld charm only supports high-availability through usage of a shared file
+            system provided via the filesystem-client charm. This unit test validates that we
+            properly handle if multiple slurmctld units are deployed without these conditions met.
+        """
+        self.harness.set_leader(True)
         self.harness.add_relation("slurmctld-peer", self.harness.charm.app.name)
+        self.harness.set_leader(False)
+        setattr(self.harness.charm._stored, "slurm_installed", True)  # Patch StoredState
 
         self.harness.charm.on.start.emit()
 
@@ -58,7 +66,7 @@ class TestCharm(TestCase):
         self.assertEqual(
             self.harness.charm.unit.status,
             BlockedStatus(
-                "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
+                "a shared file system must be provided to enable slurmctld high availability"
             ),
         )
 
@@ -103,29 +111,6 @@ class TestCharm(TestCase):
         self.harness.charm.on.install.emit()
         defer.assert_not_called()
 
-    @patch("charm.SlurmctldCharm._on_install")
-    @patch("ops.framework.EventBase.defer")
-    def test_install_fail_ha_support(self, defer, *_) -> None:
-        """Test erroneous deployment of multiple slurmctld units.
-
-        Notes:
-            The slurmctld charm currently does not support high-availability without
-            the `use-network-state` configuration set to True and a shared file system
-            provided via the filesystem-client charm. This unit test validates that we
-            properly handle if multiple slurmctld units are deployed without these
-            conditions met.
-        """
-        self.harness.set_leader(False)
-        self.harness.charm.on.start.emit()
-
-        defer.assert_called()
-        self.assertEqual(
-            self.harness.charm.unit.status,
-            BlockedStatus(
-                "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
-            ),
-        )
-
     @patch("ops.framework.EventBase.defer")
     def test_install_fail_slurmctld_package(self, defer) -> None:
         """Test `InstallEvent` hook when slurmctld fails to install."""
@@ -162,6 +147,8 @@ class TestCharm(TestCase):
         """Test that the get_jwt_rsa method works."""
         self.harness.charm._slurmctld.jwt.path.parent.mkdir(parents=True)
         self.harness.charm._slurmctld.jwt.set("=ABC=")
+        self.harness.set_leader(True)
+        self.harness.add_relation("slurmctld-peer", self.harness.charm.app.name)
         self.assertEqual(self.harness.charm.get_jwt_rsa(), "=ABC=")
 
     @patch("charm.SlurmctldCharm._check_status", return_value=False)
@@ -211,7 +198,7 @@ class TestCharm(TestCase):
         relation_id = self.harness.add_relation("login-node", "sackd")
         self.assertEqual(
             self.harness.get_relation_data(relation_id, "slurmctld")["cluster_info"],
-            '{"auth_key": "MTIzNDU2Nzg5MA==", "slurmctld_hosts": []}',
+            f'{{"auth_key": "MTIzNDU2Nzg5MA==", "slurmctld_hosts": ["{self.harness.charm.hostname}"]}}',
         )
 
     @patch("ops.framework.EventBase.defer")

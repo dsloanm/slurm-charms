@@ -7,20 +7,22 @@
 import json
 import logging
 import shlex
-import shutil
 import subprocess
-from datetime import datetime
+from os import PathLike
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from constants import (
     CHARM_MAINTAINED_CGROUP_CONF_PARAMETERS,
     CHARM_MAINTAINED_SLURM_CONF_PARAMETERS,
+    DEFAULT_SLURM_CONF_PARAMETERS,
+    HA_MOUNT_RELATION,
     PEER_RELATION,
     PROMETHEUS_EXPORTER_PORT,
     SLURMCTLD_PORT,
 )
 from exceptions import IngressAddressUnavailableError
+from high_availability import SlurmctldHA
 from hpc_libs.is_container import is_container
 from hpc_libs.slurm_ops import SlurmctldManager, SlurmOpsError
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
@@ -48,6 +50,7 @@ from ops import (
     ConfigChangedEvent,
     InstallEvent,
     LeaderElectedEvent,
+    MaintenanceStatus,
     StartEvent,
     StoredState,
     UpdateStatusEvent,
@@ -80,10 +83,12 @@ class SlurmctldCharm(CharmBase):
             acct_gather_params={},
             job_profiling_slurm_conf={},
             last_restart_signal=str(),
+            last_state_save_location=DEFAULT_SLURM_CONF_PARAMETERS["StateSaveLocation"],
         )
 
         self._slurmctld = SlurmctldManager(snap=False)
         self._slurmctld_peer = SlurmctldPeer(self, PEER_RELATION)
+        self._slurmctld_ha = SlurmctldHA(self, HA_MOUNT_RELATION)
         self._sackd = Sackd(self, "login-node")
         self._slurmd = Slurmd(self, "slurmd")
         self._slurmdbd = Slurmdbd(self, "slurmdbd")
@@ -131,6 +136,12 @@ class SlurmctldCharm(CharmBase):
                 "-slurm.collect-limits",
             ]
 
+            if self.unit.is_leader():
+                if not self._slurmctld.jwt.path.exists():
+                    self._slurmctld.jwt.generate()
+                if not self._slurmctld.key.path.exists():
+                    self._slurmctld.key.generate()
+
             self.unit.set_workload_version(self._slurmctld.version())
             self.slurm_installed = True
         except SlurmOpsError as e:
@@ -143,21 +154,23 @@ class SlurmctldCharm(CharmBase):
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Refresh config files on leader re-election."""
-        if not self.config.get("use-network-state"):
-            logger.debug("not in HA configuration. skipping event")
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+        if not checkpoint_data:
+            logger.debug("checkpoint data not set. skipping event")
             return
 
-        if not self.all_units_observed():
-            logger.debug("not all peers observed yet. deferring event")
-            event.defer()
-            return
-
-        state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-        if not state_save_location.is_mount():
-            logger.debug("%s not yet mounted. skipping event", state_save_location)
+        # Refresh config only if in an HA setup with a shared SaveStateLocation
+        # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
+        state_save_parent = Path(checkpoint_data["StateSaveLocation"]).parent
+        if not state_save_parent.is_mount():
+            logger.debug("%s is not a mounted file system. skipping event", state_save_parent)
             return
 
         self._on_write_slurm_conf(event)
+        if event.deferred:
+            logger.debug("attempt to write slurm.conf deferred event")
+            return
+
         self._sackd.update_controllers()
         self._slurmd.update_controllers()
         self._check_status()
@@ -169,42 +182,17 @@ class SlurmctldCharm(CharmBase):
             - The start hook can execute multiple times in a charms lifecycle,
               for example, after a reboot of the underlying instance.
         """
-        if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-            if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(
-                    f"waiting for {state_save_location} to be mounted"
-                )
-                event.defer()
-                return
-            shutil.chown(state_save_location, "slurm", "slurm")
+        self._on_write_slurm_conf(event)
+        if event.deferred:
+            logger.debug("attempt to write slurm.conf deferred event")
+            return
 
-            # Move config data to network storage
-            etc_source = Path("/etc/slurm")
-            etc_target = state_save_location / "etc-slurm"
-            try:
-                self._migrate_etc_data(etc_source, etc_target)
-            except Exception:
-                logger.exception(
-                    "failed to migrate slurm configuration from %s to %s. deferring event",
-                    etc_source,
-                    etc_target,
-                )
-                event.defer()
-                return
+        if not self._check_status():
+            logger.debug("unit not ready. deferring event")
+            event.defer()
+            return
 
-        if self.unit.is_leader():
-            if not self._slurmctld.jwt.path.exists():
-                self._slurmctld.jwt.generate()
-            if not self._slurmctld.key.path.exists():
-                self._slurmctld.key.generate()
-
-            self._on_write_slurm_conf(event)
-            if event.deferred:
-                logger.debug("attempt to write slurm.conf deferred start event")
-                return
-        else:
-            # In an HA setup, peers defer until leader writes out keys and configuration files.
+        if not self.unit.is_leader():
             if not self._peer_ready():
                 logger.debug("peer not ready. deferring event")
                 event.defer()
@@ -215,73 +203,9 @@ class SlurmctldCharm(CharmBase):
             self._slurmctld.service.restart()
             self._slurmctld.exporter.service.enable()
             self._slurmctld.exporter.service.restart()
-            self._check_status()
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()
-
-    def _migrate_etc_data(self, etc_source: Path, etc_target: Path) -> None:
-        """Migrate the given source directory to the given target.
-
-        The charm leader recursively copies the source directory to the target.
-        All units then replace the source with a symlink to the target.
-
-        This is necessary in a high availability (HA) deployment as all slurmctld units require access to identical conf files.
-        For this reason, the target must be located on shared storage mounted on all slurmctld units.
-
-        To avoid data loss, the existing configuration is backed up to a directory suffixed by the current date and time before migration.
-        For example, `/etc/slurm_20250620_161437`.
-        """
-        # Nothing to do if target already correctly symlinked
-        if etc_source.is_symlink() and etc_source.resolve() == etc_target:
-            logger.debug("%s -> %s sylink already exists", etc_source, etc_target)
-            return
-
-        if self.unit.is_leader() and etc_source.is_dir() and not etc_target.exists():
-            logger.debug("leader copying %s to %s", etc_source, etc_target)
-            shutil.copytree(etc_source, etc_target)
-
-        if etc_source.exists():
-            # Timestamp to avoid overwriting any existing backup
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_target = Path(f"{etc_source}_{timestamp}")
-            logger.debug("backing up %s to %s", etc_source, backup_target)
-            shutil.move(etc_source, backup_target)
-        else:
-            logger.warning("%s not found. unable to backup existing slurm data", etc_source)
-
-        logger.debug("symlinking %s to %s", etc_source, etc_target)
-        etc_source.symlink_to(etc_target)
-
-    def _peer_ready(self) -> bool:
-        """Return True if all conditions are met to allow this peer to start. False otherwise."""
-        if self.unit.is_leader():
-            return True
-
-        if not self.config.get("use-network-state"):
-            msg = "High availability requires slurmctld to have been deployed with `use-network-state` enabled."
-            self.unit.status = BlockedStatus(msg)
-            logger.warning(msg)
-            return False
-
-        if not self._slurmctld.config.path.exists():
-            logger.debug("%s not found", self._slurmctld.config.path)
-            return False
-
-        config = self._slurmctld.config.load()
-        if self.hostname not in config.slurmctld_host:  # type: ignore
-            logger.debug("%s not in %s.", self.hostname, self._slurmctld.config.path)
-            return False
-
-        if not self._slurmctld.key.path.exists():
-            logger.debug("auth key %s not found", self._slurmctld.key.path)
-            return False
-
-        if not self._slurmctld.jwt.path.exists():
-            logger.debug("JWT key %s not found", self._slurmctld.jwt.path)
-            return False
-
-        return True
 
     def _on_config_changed(self, event: ConfigChangedEvent) -> None:
         """Perform config-changed operations."""
@@ -325,15 +249,6 @@ class SlurmctldCharm(CharmBase):
         self, event: Union[SlurmctldAvailableEvent, SlurmctldDepartedEvent]
     ) -> None:
         """Update slurmctld configuration and list of controllers on all Slurm services."""
-        # self.all_units_observed() check not needed as event is not emitted unless this is true
-
-        if not self._check_status():
-            logger.debug(
-                "attempted slurmctld relation change while unit is not ready. deferring event"
-            )
-            event.defer()
-            return
-
         # Only slurm.conf update needed. New slurmctld controllers joining or leaving do not change any other conf file.
         self._on_write_slurm_conf(event)
         self._sackd.update_controllers()
@@ -342,20 +257,27 @@ class SlurmctldCharm(CharmBase):
 
     def _on_slurmrestd_available(self, event: SlurmrestdAvailableEvent) -> None:
         """Check that we have slurm_config when slurmrestd available otherwise defer the event."""
-        if self.unit.is_leader():
-            if self._check_status():
-                if self._stored.slurmdbd_host != "":
-                    self._slurmrestd.set_slurm_config_on_app_relation_data(
-                        str(self._slurmctld.config.load()),
-                    )
-                    return
-                else:
-                    logger.debug("Need slurmdbd for slurmrestd relation.")
-                    event.defer()
-                    return
-            else:
-                logger.debug("Cluster not ready yet, deferring event.")
-                event.defer()
+        if not self.unit.is_leader():
+            return
+
+        if not self._check_status():
+            logger.debug("cluster not ready yet. deferring event")
+            event.defer()
+            return
+
+        if self._stored.slurmdbd_host == "":
+            logger.debug("need slurmdbd for slurmrestd relation")
+            event.defer()
+            return
+
+        if not self._slurmctld.config.path.exists():
+            logger.debug("slurm.conf does not exist. deferring event")
+            event.defer()
+            return
+
+        self._slurmrestd.set_slurm_config_on_app_relation_data(
+            str(self._slurmctld.config.load()),
+        )
 
     def _on_slurmdbd_available(self, event: SlurmdbdAvailableEvent) -> None:
         self._stored.slurmdbd_host = event.slurmdbd_host
@@ -443,12 +365,13 @@ class SlurmctldCharm(CharmBase):
             Lack of map between departing unit and NodeName complicates removal of node from gres.conf.
             Instead, rewrite full gres.conf with data from remaining units.
         """
-        if not self.unit.is_leader():
+        if not self.all_units_observed():
+            logger.debug("slurmd departing while application is scaling. deferring event")
+            event.defer()
             return
 
-        if not self._check_status():
-            logger.debug("slurmd departing while unit is not ready. deferring event")
-            event.defer()
+        # Leader check after all_units_observed() as leader may have changed since event deferred
+        if not self.unit.is_leader():
             return
 
         # Reconcile the new_nodes.
@@ -549,7 +472,6 @@ class SlurmctldCharm(CharmBase):
 
         # Only the leader should write the config, restart, and scontrol reconf.
         if not self.unit.is_leader():
-            logger.warning("non-leader attempted to write slurm.conf")
             return
 
         if not self.all_units_observed():
@@ -591,7 +513,8 @@ class SlurmctldCharm(CharmBase):
                 logger.error(e)
                 return
 
-            # In an HA setup, signal all other slurmctld instances to restart and reload slurm.conf.
+            # In an HA setup, signal all other slurmctld instances to restart and reload
+            # SlurmctldHosts from slurm.conf.
             # Workaround for `scontrol reconfigure` not instructing this.
             self._slurmctld_peer.signal_slurmctld_restart()
 
@@ -667,11 +590,19 @@ class SlurmctldCharm(CharmBase):
             profiling_parameters = self._assemble_profiling_params()
             logger.debug(f"## profiling_params: {profiling_parameters}")
 
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+
         slurm_conf = SlurmConfig.from_dict(
             {
                 "ClusterName": self.cluster_name,
                 "SlurmctldHost": self.get_controllers(),
                 "SlurmctldParameters": _assemble_slurmctld_parameters(),
+                "AuthAltParameters": (
+                    checkpoint_data["AuthAltParameters"] if checkpoint_data else None
+                ),
+                "StateSaveLocation": (
+                    checkpoint_data["StateSaveLocation"] if checkpoint_data else None
+                ),
                 "ProctrackType": "proctrack/linuxproc" if is_container() else "proctrack/cgroup",
                 "TaskPlugin": (
                     ["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"]
@@ -726,16 +657,8 @@ class SlurmctldCharm(CharmBase):
         This charm needs these conditions to be satisfied in order to be ready:
         - Slurmctld component installed
         - Cluster name set
-        - If using network storage, it is mounted
+        - Additional checks if a peer/non-leader in an HA setup
         """
-        if self.config.get("use-network-state"):
-            state_save_location = Path(CHARM_MAINTAINED_SLURM_CONF_PARAMETERS["StateSaveLocation"])
-            if not state_save_location.is_mount():
-                self.unit.status = BlockedStatus(
-                    f"waiting for {state_save_location} to be mounted"
-                )
-                return False
-
         if self.slurm_installed is not True:
             self.unit.status = BlockedStatus(
                 "failed to install slurmctld. see logs for further details"
@@ -743,7 +666,7 @@ class SlurmctldCharm(CharmBase):
             return False
 
         if self.cluster_name is None:
-            self.unit.status = WaitingStatus("Waiting for cluster_name....")
+            self.unit.status = MaintenanceStatus("waiting for cluster_name")
             return False
 
         try:
@@ -753,6 +676,64 @@ class SlurmctldCharm(CharmBase):
             status = ""
 
         self.unit.status = ActiveStatus(status)
+        return True
+
+    def _peer_ready(self) -> bool:
+        """Return True if all conditions are met to allow this peer/non-leader to become active. False otherwise.
+
+        These conditions must be satisfied:
+        - Checkpoint data set
+        - High availability shared file system mounted
+        - slurm.conf exists
+        - slurm.conf includes this unit's hostname
+        - slurm.conf StateSaveLocation matches peer relation
+        - auth key exists
+        - JWT key exists
+        """
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+        if not checkpoint_data:
+            self.unit.status = MaintenanceStatus("waiting for checkpoint_data")
+            return False
+
+        # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
+        # e.g. "/mnt/slurmctld-statefs/checkpoint" => check if "/mnt/slurmctld-statefs" is a mount
+        state_save_parent = Path(checkpoint_data["StateSaveLocation"]).parent
+        if not state_save_parent.is_mount():
+            self.unit.status = BlockedStatus(
+                "a shared file system must be provided to enable slurmctld high availability"
+            )
+            return False
+
+        if not self._slurmctld.config.path.exists():
+            self.unit.status = MaintenanceStatus(
+                f"waiting for {self._slurmctld.config.path} generation"
+            )
+            return False
+
+        config = self._slurmctld.config.load()
+        if self.hostname not in config.slurmctld_host:  # type: ignore
+            self.unit.status = MaintenanceStatus(
+                f"waiting for {self.hostname} to be added to {self._slurmctld.config.path}"
+            )
+            return False
+
+        if checkpoint_data["StateSaveLocation"] != config.state_save_location:  # type: ignore
+            self.unit.status = MaintenanceStatus(
+                "waiting for StateSaveLocation migration to update slurm.conf"
+            )
+            return False
+
+        if not self._slurmctld.key.path.exists():
+            self.unit.status = MaintenanceStatus(
+                f"waiting for {self._slurmctld.key.path} generation"
+            )
+            return False
+
+        jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+        if not jwt_key_path.exists():
+            self.unit.status = MaintenanceStatus(f"waiting for {jwt_key_path} generation")
+            return False
+
         return True
 
     def get_controllers(self) -> list[str]:
@@ -772,9 +753,8 @@ class SlurmctldCharm(CharmBase):
 
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
-        from_peer_set = set(from_peer)
         from_file_set = set(from_file)
-        current_controllers = [c for c in from_file if c in from_peer_set] + [
+        current_controllers = [c for c in from_file if c in from_peer] + [
             c for c in from_peer if c not in from_file_set
         ]
 
@@ -790,10 +770,24 @@ class SlurmctldCharm(CharmBase):
 
     def get_jwt_rsa(self) -> Optional[str]:
         """Get the current jwt_rsa key."""
+        checkpoint_data = self._slurmctld_peer.checkpoint_data
+        if not checkpoint_data:
+            return None
+
         try:
-            return self._slurmctld.jwt.get()
+            # TODO: mutable JWT path in hpclibs
+            # return self._slurmctld.jwt.get()
+            jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+            return jwt_key_path.read_text()
         except FileNotFoundError:
             return None
+
+    def set_jwt_path(self, keyfile: Union[str, PathLike]):
+        """Set the current jwt_rsa key file to the given path."""
+        # TODO: a public interface is needed for this.
+        # This is unreliable - hpclibs seems to overwrite.
+        self._slurmctld.jwt._keyfile = Path(keyfile)
+        logger.debug("jwt key path set to %s", keyfile)
 
     def get_controller_status(self, hostname: str) -> str:
         """Return the status of the given controller instance, e.g. 'primary - UP'."""

@@ -3,12 +3,13 @@
 
 """SlurmctldPeer."""
 
+import json
 import logging
 import secrets
 import time
-from typing import Optional
+from typing import Any, Optional
 
-from constants import CLUSTER_NAME_PREFIX
+from constants import CLUSTER_NAME_PREFIX, DEFAULT_SLURM_CONF_PARAMETERS
 from ops import (
     EventBase,
     EventSource,
@@ -79,6 +80,7 @@ class SlurmctldPeer(Object):
 
     def _on_relation_created(self, event: RelationCreatedEvent) -> None:
         self._relation.data[self._charm.unit]["hostname"] = self._charm.hostname
+
         if not self._charm.unit.is_leader():
             return
 
@@ -91,22 +93,43 @@ class SlurmctldPeer(Object):
             logger.debug(f"Cluster Name: {cluster_name}")
             self.cluster_name = cluster_name
 
+        if self.checkpoint_data is None:
+            checkpoint_data = {
+                "AuthAltParameters": DEFAULT_SLURM_CONF_PARAMETERS["AuthAltParameters"],
+                "StateSaveLocation": DEFAULT_SLURM_CONF_PARAMETERS["StateSaveLocation"],
+            }
+            self.checkpoint_data = checkpoint_data
+
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         # Workaround for `scontrol reconfigure` not signalling slurmctld to reload slurm.conf.
-        # Use the peer relation to trigger a restart ourselves.
+        # Use the peer relation to trigger a restart.
         # Note: must be a restart. Reloading causes the slurmctld process to exit.
         restart_signal = self._relation.data[self.model.app].get("restart_signal", "")
         if restart_signal != self._charm._stored.last_restart_signal:
             logger.debug("restart signal found. restarting slurmctld")
             self._charm._stored.last_restart_signal = restart_signal
 
+            # Restart could be from a StateSaveLocation migration
+            if checkpoint_data := self.checkpoint_data:
+                last_path = self._charm._stored.last_state_save_location
+                current_path = checkpoint_data["StateSaveLocation"]
+
+                if current_path != last_path:
+                    logger.debug(
+                        "StateSaveLocation migration occurred. path was %s now %s",
+                        last_path,
+                        current_path,
+                    )
+                    self._charm.set_jwt_path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+
             # Leader already restarted its service when writing out slurm.conf
             if not self._charm.unit.is_leader():
-                self._charm._slurmctld.service.restart()
+                # Emits if a start event is not already in the defer queue
+                self._charm.on.start.emit()
 
             return
 
-        # Fire only once the leader unit has completed relation-joined for all units
+        # Fire when application is scaling up once the leader unit has observed relation-joined for all units
         if self._charm.unit.is_leader() and self.all_units_observed():
             self.on.slurmctld_available.emit()
             return
@@ -147,21 +170,31 @@ class SlurmctldPeer(Object):
             return
 
         # Current timestamp used so a unique value is written to the relation on each call.
-        signal = str(time.time())
-        self._relation.data[self.model.app]["restart_signal"] = signal
+        self._relation.data[self.model.app]["restart_signal"] = str(time.time())
 
     @property
-    def controllers(self) -> list:
-        """Return the list of controllers."""
+    def controllers(self) -> set[str]:
+        """Return controller hostnames from the peer relation.
+
+        Always includes the hostname of this unit, even when the peer relation is not established.
+        This ensures a valid controller is returned when integrations with other applications, such
+        as slurmd or sackd, occur first.
+        """
+        controllers = {self._charm.hostname}
+
         try:
             logger.debug(
-                "gathering controller hostnames from peer relation: %s", self._relation.data
+                "Gathering controller hostnames from peer relation: %s", self._relation.data
             )
-            return [
-                data["hostname"] for data in self._relation.data.values() if "hostname" in data
-            ]
+            for data in self._relation.data.values():
+                hostname = data.get("hostname")
+                if hostname:
+                    controllers.add(hostname)
         except SlurmctldPeerError:
-            return []
+            logger.debug("peer relation not established")
+
+        logger.debug("returning controllers: %s", controllers)
+        return controllers
 
     @property
     def cluster_name(self) -> Optional[str]:
@@ -172,22 +205,50 @@ class SlurmctldPeer(Object):
                 "cluster_name"
             ):
                 cluster_name = cluster_name_from_relation
-            logger.debug(f"## `slurmctld-peer` relation available. cluster_name: {cluster_name}.")
+            logger.debug("retrieved cluster_name '%s' from peer relation", cluster_name)
         except SlurmctldPeerError:
-            logger.debug(
-                "## `slurmctld-peer` relation not available yet, cannot get cluster_name."
-            )
+            logger.debug("peer relation not available yet, cannot get cluster_name.")
         return cluster_name
 
     @cluster_name.setter
     def cluster_name(self, name: str) -> None:
         """Set the cluster_name on app relation data."""
         if not self.framework.model.unit.is_leader():
-            logger.debug("only leader can set the Slurm cluster name")
+            logger.warning("non-leader attempted to set cluster_name")
             return
 
         try:
             self._relation.data[self.model.app]["cluster_name"] = name
         except SlurmctldPeerError as e:
             e.add_note("cannot set cluster_name")
+            raise
+
+    @property
+    def checkpoint_data(self) -> Optional[dict[str, Any]]:
+        """Return the AuthAltParameters and StateSaveLocation from app relation data."""
+        checkpoint_data = None
+        try:
+            if checkpoint_data_from_relation := self._relation.data[self.model.app].get(
+                "checkpoint_data"
+            ):
+                checkpoint_data = json.loads(checkpoint_data_from_relation)
+            logger.debug(
+                "retrieved checkpoint_data: %s from peer relation",
+                checkpoint_data,
+            )
+        except SlurmctldPeerError:
+            logger.debug("peer relation not available yet, cannot get checkpoint_data.")
+        return checkpoint_data
+
+    @checkpoint_data.setter
+    def checkpoint_data(self, data: dict[str, Any]) -> None:
+        """Set the AuthAltParameters and StateSaveLocation on app relation data."""
+        if not self.framework.model.unit.is_leader():
+            logger.warning("non-leader attempted to set checkpoint_data")
+            return
+
+        try:
+            self._relation.data[self.model.app]["checkpoint_data"] = json.dumps(data)
+        except SlurmctldPeerError as e:
+            e.add_note("cannot set checkpoint_data")
             raise
