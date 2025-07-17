@@ -35,7 +35,7 @@ from constants import (
 )
 
 logger = logging.getLogger(__name__)
-pytestmark = pytest.mark.highavailability
+pytestmark = pytest.mark.high_availability
 
 
 def assert_pinged(controllers: dict, expected_statuses: dict):
