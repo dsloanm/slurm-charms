@@ -159,9 +159,18 @@ def test_slurmctld_ha_deploy(juju: jubilant.Juju) -> None:
     juju.integrate(f"{FILESYSTEM_CLIENT_APP_NAME}:mount", f"{SLURMCTLD_APP_NAME}:mount")
     juju.wait(jubilant.all_active, timeout=SLURM_WAIT_TIMEOUT)
 
-    controllers = _get_slurm_controllers(juju)
     logger.info("checking primary controller")
-    assert_pinged(controllers, {"primary": "UP"})
+
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
+    )
+    def retry_asserts():
+        controllers = _get_slurm_controllers(juju)
+        assert_pinged(controllers, {"primary": "UP"})
+
+    retry_asserts()
 
 
 @pytest.mark.order(13)
@@ -176,18 +185,26 @@ def test_slurmctld_scale_up(juju: jubilant.Juju) -> None:
     # All Slurm apps must be waited for to allow new controller hostnames to propagate
     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
 
-    # Primary controller must not have changed. New units must be backups
-    new_controllers = _get_slurm_controllers(juju)
-    assert len(new_controllers) == 3, f"expected 3 controllers, got {len(new_controllers)}"
-    assert_hostname(new_controllers, controllers, {"primary": "primary"})
-    assert_pinged(
-        new_controllers,
-        {
-            "primary": "UP",
-            "backup1": "UP",
-            "backup2": "UP",
-        },
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
     )
+    def retry_asserts():
+        new_controllers = _get_slurm_controllers(juju)
+        assert len(new_controllers) == 3, f"expected 3 controllers, got {len(new_controllers)}"
+        # Primary controller must not have changed. New units must be backups
+        assert_hostname(new_controllers, controllers, {"primary": "primary"})
+        assert_pinged(
+            new_controllers,
+            {
+                "primary": "UP",
+                "backup1": "UP",
+                "backup2": "UP",
+            },
+        )
+
+    retry_asserts()
 
 
 @pytest.mark.order(14)
@@ -213,33 +230,32 @@ def test_slurmctld_scale_down(juju: jubilant.Juju) -> None:
         and jubilant.all_active(status, *SLURM_APPS)
     )
 
-    # Can take time for changes to propagate to login node. Retry if get stale controllers
+    # Can take time for changes to propagate to login node. Retry if assertions fail
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
-        stop=tenacity.stop_after_attempt(10),
+        stop=tenacity.stop_after_attempt(5),
         reraise=True,
     )
-    def retry_get_slurm_controllers(juju):
+    def retry_asserts():
         new_controllers = _get_slurm_controllers(juju)
         assert "backup" in new_controllers
-        return new_controllers
+        assert_hostname(
+            new_controllers,
+            controllers,
+            {
+                "primary": "primary",
+                "backup": "backup2",
+            },
+        )
+        assert_pinged(
+            new_controllers,
+            {
+                "primary": "UP",
+                "backup": "UP",
+            },
+        )
 
-    new_controllers = retry_get_slurm_controllers(juju)
-    assert_hostname(
-        new_controllers,
-        controllers,
-        {
-            "primary": "primary",
-            "backup": "backup2",
-        },
-    )
-    assert_pinged(
-        new_controllers,
-        {
-            "primary": "UP",
-            "backup": "UP",
-        },
-    )
+    retry_asserts()
 
 
 @pytest.mark.order(15)
@@ -262,13 +278,22 @@ def test_slurmctld_service_failover(juju: jubilant.Juju) -> None:
     juju.exec(f"sudo systemctl stop {slurmctld_service}", unit=controllers["primary"]["unit"])
 
     logger.info("triggering failover")
-    sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
-    assert_sinfo(sinfo_result)
 
-    service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
     )
-    assert "slurmctld: Running as primary controller" in service_result.stdout
+    def retry_asserts():
+        sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
+        assert_sinfo(sinfo_result)
+
+        service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+        )
+        assert "slurmctld: Running as primary controller" in service_result.stdout
+
+    retry_asserts()
 
 
 @pytest.mark.order(16)
@@ -290,12 +315,14 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
     logger.info("restarting primary controller service")
     juju.exec(f"sudo systemctl restart {slurmctld_service}", unit=controllers["primary"]["unit"])
 
+    logger.info("testing recovery")
+
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
-        stop=tenacity.stop_after_attempt(3),
+        stop=tenacity.stop_after_attempt(5),
         reraise=True,
     )
-    def retry_test_recovery(juju):
+    def retry_asserts():
         sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
         assert_sinfo(sinfo_result)
 
@@ -309,8 +336,7 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
         )
         assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
 
-    logger.info("testing recovery")
-    retry_test_recovery(juju)
+    retry_asserts()
 
 
 @pytest.mark.order(17)
@@ -338,18 +364,29 @@ def test_slurmctld_unit_failover(juju: jubilant.Juju) -> None:
     )
 
     logger.info("triggering failover")
-    sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
-    assert_sinfo(sinfo_result)
 
-    service_result = juju.exec(
-        f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
     )
-    assert "slurmctld: Running as primary controller" in service_result.stdout
+    def retry_asserts():
+        sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
+        assert_sinfo(sinfo_result)
 
-    logger.info("testing job submission")
-    slurmd_result = juju.exec("hostname -s", unit=compute_unit)
-    sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} hostname -s", unit=login_unit)
-    assert sackd_result.stdout == slurmd_result.stdout
+        service_result = juju.exec(
+            f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
+        )
+        assert "slurmctld: Running as primary controller" in service_result.stdout
+
+        logger.info("testing job submission")
+        slurmd_result = juju.exec("hostname -s", unit=compute_unit)
+        sackd_result = juju.exec(
+            f"srun --partition {SLURMD_APP_NAME} hostname -s", unit=login_unit
+        )
+        assert sackd_result.stdout == slurmd_result.stdout
+
+    retry_asserts()
 
 
 @pytest.mark.order(18)
@@ -370,15 +407,17 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
     assert_powered_off(juju, controllers["primary"]["machine"], controllers["primary"]["hostname"])
 
     logger.info("rebooting primary machine")
-    subprocess.check_output(["/usr/sbin/lxc", "start", controllers["primary"]["hostname"]])
+    subprocess.check_output(["lxc", "start", controllers["primary"]["hostname"]])
     juju.wait(lambda status: jubilant.all_active(status, SLURMCTLD_APP_NAME))
+
+    logger.info("testing recovery")
 
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
-        stop=tenacity.stop_after_attempt(3),
+        stop=tenacity.stop_after_attempt(5),
         reraise=True,
     )
-    def retry_test_recovery(juju):
+    def retry_asserts():
         sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
         assert_sinfo(sinfo_result)
 
@@ -392,8 +431,7 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
         )
         assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
 
-    logger.info("testing recovery")
-    retry_test_recovery(juju)
+    retry_asserts()
 
 
 @pytest.mark.order(19)
@@ -435,24 +473,32 @@ def test_slurmctld_scale_up_degraded(juju: jubilant.Juju) -> None:
 
     juju.wait(two_controllers_active, timeout=SLURM_WAIT_TIMEOUT)
 
-    new_controllers = _get_slurm_controllers(juju)
-    assert len(new_controllers) == 3, f"expected 3 controllers, got {len(controllers)}"
-    assert_hostname(
-        new_controllers,
-        controllers,
-        {
-            "primary": "primary",
-            "backup1": "backup",
-        },
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
     )
-    assert_pinged(
-        new_controllers,
-        {
-            "primary": "DOWN",
-            "backup1": "UP",
-            "backup2": "UP",
-        },
-    )
+    def retry_asserts():
+        new_controllers = _get_slurm_controllers(juju)
+        assert len(new_controllers) == 3, f"expected 3 controllers, got {len(controllers)}"
+        assert_hostname(
+            new_controllers,
+            controllers,
+            {
+                "primary": "primary",
+                "backup1": "backup",
+            },
+        )
+        assert_pinged(
+            new_controllers,
+            {
+                "primary": "DOWN",
+                "backup1": "UP",
+                "backup2": "UP",
+            },
+        )
+
+    retry_asserts()
 
 
 @pytest.mark.order(20)
@@ -477,22 +523,21 @@ def test_slurmctld_remove_failed_controller(juju: jubilant.Juju) -> None:
 
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
-        stop=tenacity.stop_after_attempt(10),
+        stop=tenacity.stop_after_attempt(5),
         reraise=True,
     )
-    def retry_get_slurm_controllers(juju):
+    def retry_asserts():
         new_controllers = _get_slurm_controllers(juju)
         assert "backup" in new_controllers
-        return new_controllers
+        assert_pinged(
+            new_controllers,
+            {
+                "primary": "UP",
+                "backup": "UP",
+            },
+        )
 
-    new_controllers = retry_get_slurm_controllers(juju)
-    assert_pinged(
-        new_controllers,
-        {
-            "primary": "UP",
-            "backup": "UP",
-        },
-    )
+    retry_asserts()
 
 
 @pytest.mark.order(21)
@@ -528,24 +573,24 @@ def test_slurmctld_remove_leader(juju: jubilant.Juju) -> None:
         and jubilant.all_active(status, *SLURM_APPS)
     )
 
+    # HA is lost at this point. Cluster is operating on a single controller
+    logger.info("testing failover")
+
     @tenacity.retry(
         wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
-        stop=tenacity.stop_after_attempt(10),
+        stop=tenacity.stop_after_attempt(5),
         reraise=True,
     )
-    def retry_get_slurm_controllers(juju):
-        logger.info("testing failover")
+    def retry_asserts():
         sinfo_result = juju.exec("sinfo", unit=login_unit, wait=30)
         assert_sinfo(sinfo_result)
 
         new_controllers = _get_slurm_controllers(juju)
         assert len(new_controllers) == 1
-        return new_controllers
+        assert_hostname(new_controllers, controllers, {"primary": non_leader})
+        assert_pinged(new_controllers, {"primary": "UP"})
 
-    # HA is lost at this point. Cluster is operating on a single controller
-    new_controllers = retry_get_slurm_controllers(juju)
-    assert_hostname(new_controllers, controllers, {"primary": non_leader})
-    assert_pinged(new_controllers, {"primary": "UP"})
+    retry_asserts()
 
 
 @pytest.mark.order(22)
@@ -563,16 +608,24 @@ def test_slurmctld_sackd_scale_up(juju: jubilant.Juju) -> None:
     juju.add_unit(SACKD_APP_NAME)
     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
 
-    new_controllers = _get_slurm_controllers(juju, new_login_unit)
-    assert len(new_controllers) == 2, f"expected 2 controllers, got {len(controllers)}"
-    assert_hostname(new_controllers, controllers, {"primary": "primary"})
-    assert_pinged(
-        new_controllers,
-        {
-            "primary": "UP",
-            "backup": "UP",
-        },
+    @tenacity.retry(
+        wait=tenacity.wait.wait_exponential(multiplier=3, min=10, max=30),
+        stop=tenacity.stop_after_attempt(5),
+        reraise=True,
     )
+    def retry_asserts():
+        new_controllers = _get_slurm_controllers(juju, new_login_unit)
+        assert len(new_controllers) == 2, f"expected 2 controllers, got {len(controllers)}"
+        assert_hostname(new_controllers, controllers, {"primary": "primary"})
+        assert_pinged(
+            new_controllers,
+            {
+                "primary": "UP",
+                "backup": "UP",
+            },
+        )
+
+    retry_asserts()
 
 
 # TODO: restore these tests once dynamic nodes work is complete
