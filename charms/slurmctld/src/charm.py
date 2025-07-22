@@ -176,7 +176,7 @@ class SlurmctldCharm(CharmBase):
         self._check_status()
 
     def _on_start(self, event: StartEvent) -> None:
-        """Set cluster_name and write slurm.conf.
+        """Write slurm.conf and start services.
 
         Notes:
             - The start hook can execute multiple times in a charms lifecycle,
