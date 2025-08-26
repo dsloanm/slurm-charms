@@ -16,7 +16,9 @@
 
 """Charmed operator for `slurmctld`, Slurm's controller service."""
 
+import json
 import logging
+from pathlib import Path
 import secrets
 from typing import cast
 
@@ -33,6 +35,7 @@ from constants import (
     ACCOUNTING_CONFIG_FILE,
     CLUSTER_NAME_PREFIX,
     DEFAULT_PROFILING_CONFIG,
+    HA_MOUNT_RELATION,
     PEER_INTEGRATION_NAME,
     PROFILING_CONFIG_FILE,
     PROMETHEUS_EXPORTER_PORT,
@@ -42,6 +45,7 @@ from constants import (
     SLURMDBD_INTEGRATION_NAME,
     SLURMRESTD_INTEGRATION_NAME,
 )
+from high_availability import SlurmctldHA
 from hpc_libs.interfaces import (
     ControllerData,
     SackdConnectedEvent,
@@ -71,7 +75,15 @@ from slurmutils import (
     NodeSet,
     SlurmConfig,
 )
-from state import check_slurmctld, cluster_name_set, config_ready, slurmctld_installed
+from state import (
+    all_units_observed,
+    check_slurmctld,
+    cluster_name_set,
+    config_ready,
+    peer_ready,
+    shared_state_mounted,
+    slurmctld_installed
+)
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 
@@ -90,6 +102,7 @@ class SlurmctldCharm(ops.CharmBase):
 
         self.slurmctld = SlurmctldManager(snap=False)
         framework.observe(self.on.install, self._on_install)
+        framework.observe(self.on.leader_elected, self._on_leader_elected)
         framework.observe(self.on.start, self._on_start)
         framework.observe(self.on.config_changed, self._on_config_changed)
         framework.observe(self.on.update_status, self._on_update_status)
@@ -102,6 +115,7 @@ class SlurmctldCharm(ops.CharmBase):
             self.slurmctld_peer.on.slurmctld_peer_connected,
             self._on_slurmctld_peer_connected,
         )
+        self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_RELATION)
 
         self.sackd = SackdRequirer(self, SACKD_INTEGRATION_NAME)
         framework.observe(self.sackd.on.sackd_connected, self._on_sackd_connected)
@@ -133,20 +147,10 @@ class SlurmctldCharm(ops.CharmBase):
     @refresh
     def _on_install(self, event: ops.InstallEvent) -> None:
         """Install `slurmctld` after charm is deployed on the unit."""
-        if not self.unit.is_leader():
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "`slurmctld` high-availability is not supported. Scale down application"
-                )
-            )
-
         self.unit.status = ops.MaintenanceStatus("Installing `slurmctld`")
 
         try:
             self.slurmctld.install()
-
-            self.slurmctld.jwt.generate()
-            self.slurmctld.key.generate()
 
             self.slurmctld.exporter.service.stop()
             self.slurmctld.exporter.service.disable()
@@ -157,6 +161,15 @@ class SlurmctldCharm(ops.CharmBase):
 
             self.slurmctld.service.stop()
             self.slurmctld.service.disable()
+
+            if self.unit.is_leader():
+                # Check for existence of keys to avoid erroneous regeneration in the case where a
+                # new unit is elected leader as it is being deployed
+                if not self.slurmctld.jwt.path.exists():
+                    self.slurmctld.jwt.generate()
+                if not self.slurmctld.key.path.exists():
+                    self.slurmctld.key.generate()
+
             self.unit.set_workload_version(self.slurmctld.version())
         except SlurmOpsError as e:
             logger.error(e.message)
@@ -171,8 +184,28 @@ class SlurmctldCharm(ops.CharmBase):
         self.unit.open_port("tcp", PROMETHEUS_EXPORTER_PORT)
 
     @refresh
-    @wait_unless(cluster_name_set)
-    @block_unless(slurmctld_installed)
+    @reconfigure
+    def _on_leader_elected(self, event: ops.LeaderElectedEvent) -> None:
+        """Refresh controller lists on leader re-election."""
+        # Refresh only if in an HA setup with a shared SaveStateLocation
+        # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
+        config = self.slurmctld.config.load()
+        state_save_parent = Path(config.state_save_location).parent
+        if not state_save_parent.is_mount():
+            logger.debug("%s is not a mounted file system. HA is not enabled. skipping event", state_save_parent)
+            return
+
+        # sackd and slurmd must be informed of any changes to the controller list
+        # slurmrestd gets the updated config via the reconfigure hook
+        new_controllers = self.get_controllers()
+        with self.slurmctld.config.edit() as config:
+            config.slurmctld_host = new_controllers
+        self.sackd.set_controller_data(ControllerData(controllers=new_controllers))
+        self.slurmd.set_controller_data(ControllerData(controllers=new_controllers))
+
+    @refresh
+    @wait_unless(cluster_name_set, peer_ready)
+    @block_unless(slurmctld_installed, shared_state_mounted)
     def _on_start(self, event: ops.StartEvent) -> None:
         """Write slurm.conf and start `slurmctld` service.
 
@@ -180,15 +213,10 @@ class SlurmctldCharm(ops.CharmBase):
             - The start hook can execute multiple times in a charms lifecycle,
               for example, after a reboot of the underlying instance.
         """
-        if not self.unit.is_leader():
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "`slurmctld` high-availability is not supported. Scale down application"
-                )
-            )
-
         try:
-            init_config(self)
+            # Prevent slurm.conf being overwritten after a reboot of the underlying instance
+            if self.unit.is_leader() and not self.slurmctld.config.exists():
+                init_config(self)
 
             self.slurmctld.service.enable()
             self.slurmctld.service.restart()
@@ -229,6 +257,21 @@ class SlurmctldCharm(ops.CharmBase):
             else f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
         )
 
+        self.slurmctld_peer.hostname = self.slurmctld.hostname
+
+    @refresh
+    @reconfigure
+    def _on_slurmctld_changed(self, event) -> None:
+        """Update slurmctld configuration and list of controllers on all relevant Slurm services."""
+        # Only a slurm.conf update needed. New slurmctld controllers joining or leaving do not
+        # change any other conf file.
+        # slurmrestd gets the updated config via the reconfigure hook
+        new_controllers = self.get_controllers()
+        with self.slurmctld.config.edit() as config:
+            config.slurmctld_host = new_controllers
+        self.sackd.set_controller_data(ControllerData(controllers=new_controllers))
+        self.slurmd.set_controller_data(ControllerData(controllers=new_controllers))
+
     @refresh
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
@@ -236,7 +279,7 @@ class SlurmctldCharm(ops.CharmBase):
         self.sackd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
-                controllers=[f"{self.slurmctld.hostname}:{SLURMCTLD_PORT}"],
+                controllers=self.get_controllers(),
             ),
             integration_id=event.relation.id,
         )
@@ -268,12 +311,13 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
-                controllers=[f"{self.slurmctld.hostname}:{SLURMCTLD_PORT}"],
+                controllers=self.get_controllers(),
                 nhc_args=cast(str, self.config.get("health-check-params", "")),
             ),
             integration_id=event.relation.id,
         )
 
+    @leader
     @refresh
     @reconfigure
     @block_unless(slurmctld_installed)
@@ -302,9 +346,10 @@ class SlurmctldCharm(ops.CharmBase):
             integration_id=event.relation.id,
         )
 
+    @leader
     @refresh
     @reconfigure
-    @wait_unless(database_ready)
+    @wait_unless(database_ready, all_units_observed)
     @block_unless(slurmctld_installed)
     def _on_slurmdbd_ready(self, event: SlurmdbdReadyEvent) -> None:
         """Handle when database data is ready from a `slurmdbd` application."""
@@ -344,6 +389,7 @@ class SlurmctldCharm(ops.CharmBase):
         except ValueError:
             pass
 
+    @leader
     @refresh
     @wait_unless(database_ready, config_ready)
     @block_unless(slurmctld_installed)
@@ -458,6 +504,66 @@ class SlurmctldCharm(ops.CharmBase):
             event.fail(message=f"Error resuming {nodes}: {e.message}")
 
         event.set_results({"status": "resuming", "nodes": nodes})
+
+    def get_controllers(self) -> list[str]:
+        """Get endpoints (hostname:port) for all controllers."""
+        # Read the current list of controllers from the slurm.conf file and compare with the
+        # controllers currently in the peer relation.
+        # File ordering must be preserved as it dictates which slurmctld instance is the primary and
+        # which are backups.
+        from_file = []
+        if self.slurmctld.config.path.exists():
+            config = self.slurmctld.config.load()
+            if config.slurmctld_host:
+                from_file = config.slurmctld_host
+        from_peer = self.slurmctld_peer.controllers
+
+        logger.debug(
+            "controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer
+        )
+
+        # Controllers in the file but not the peer relation have departed.
+        # Controllers in the peer relation but not the file are newly added.
+        from_file_set = set(from_file)
+        current_controllers = [f"{c}:{SLURMCTLD_PORT}" for c in from_file if c in from_peer] + [
+            f"{c}:{SLURMCTLD_PORT}" for c in from_peer if c not in from_file_set
+        ]
+
+        logger.debug("current controllers: %s", current_controllers)
+        return current_controllers
+
+    def get_controller_status(self, hostname: str) -> str:
+        """Return the status of the given controller instance, e.g. 'primary - UP'."""
+        # Example snippet of ping output:
+        #   "pings": [
+        #     {
+        #       "hostname": "juju-829e74-84",
+        #       "pinged": "DOWN",
+        #       "latency": 123,
+        #       "mode": "primary"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-85",
+        #       "pinged": "UP",
+        #       "latency": 456,
+        #       "mode": "backup1"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-86",
+        #       "pinged": "UP",
+        #       "latency": 789,
+        #       "mode": "backup2"
+        #     }
+        #   ],
+        stdout, _ = scontrol("ping", "--json")
+        ping_output = json.loads(stdout)
+        logger.debug("scontrol ping output: %s", ping_output)
+
+        for ping in ping_output["pings"]:
+            if ping["hostname"] == hostname:
+                return f"{ping['mode']} - {ping['pinged']}"
+
+        return ""
 
 
 if __name__ == "__main__":
