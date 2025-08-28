@@ -25,7 +25,7 @@ from constants import (
 )
 from hpc_libs.interfaces import ControllerData
 from hpc_libs.is_container import is_container
-from hpc_libs.utils import StopCharm, get_ingress_address, plog
+from hpc_libs.utils import StopCharm, plog
 from slurm_ops import SlurmOpsError, scontrol
 from slurmutils import CGroupConfig, ModelError, SlurmConfig
 from state import slurmctld_ready
@@ -172,18 +172,25 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
         )
 
     # In an HA setup, all slurmctld services across all hosts must be restarted to ensure
-    # SlurmctldHosts is reloaded from slurm.conf.
-    # `scontrol reconfigure` alone does not reload SlurmctldHosts.
+    # SlurmctldHost lines are reloaded from slurm.conf.
+    # `scontrol reconfigure` alone does not reload SlurmctldHost.
     # If a restart is not done, removal of a controller will result in a malfunctioning cluster.
     #
     # Example: 3 controllers A (primary), B (backup1), C (backup2).
-    #   - The SlurmctldHosts entry for B is removed from slurm.conf.
+    #   - The SlurmctldHost entry for B is removed from slurm.conf.
     #   - `scontrol reconfigure` is run on A.
     #   - A experiences availability issues.
-    #   - B attempts to take over, despite not being in SlurmctldHosts, and fails.
+    #   - B attempts to take over, despite not being in SlurmctldHost, and fails.
     #   - Slurm client commands now fail.
-    # TODO: exceptions
-    charm.slurmctld.service.restart()
+    try:
+        charm.slurmctld.service.restart()
+    except SlurmOpsError as e:
+        _logger.error(e.message)
+        raise StopCharm(
+            ops.BlockedStatus(
+                "Failed to restart `slurmctld.service`. See `juju debug-log` for details"
+            )
+        )
     charm.slurmctld_peer.signal_slurmctld_restart()
 
     if charm.slurmrestd.is_joined():

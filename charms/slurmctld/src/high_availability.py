@@ -4,12 +4,12 @@
 """Slurmctld high availability (HA) features."""
 
 import logging
-import ops
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
+import ops
 from constants import HA_MOUNT_POINT
 
 from charms.filesystem_client.v0.mount_info import (
@@ -36,7 +36,6 @@ class SlurmctldHA(ops.Object):
         )
         self.framework.observe(self._mount.on.mounted_filesystem, self._on_mounted_filesystem)
 
-
     def _on_mount_provider_connected(self, event: MountProviderConnectedEvent) -> None:
         """Handle filesystem-client connected event."""
         for relation in self._mount.relations:
@@ -45,18 +44,15 @@ class SlurmctldHA(ops.Object):
         logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 
-
     def _on_mounted_filesystem(self, event: MountedFilesystemEvent) -> None:
         """Handle filesystem-client mounted event."""
-        checkpoint_data = self._charm._slurmctld_peer.checkpoint_data
-        if checkpoint_data is None:
-            logger.debug("checkpoint data not set. deferring event")
+        if self._charm.unit.is_leader() and not self._charm.slurmctld.config.path.exists():
+            logger.debug("slurm.conf not found. deferring event")
             event.defer()
             return
 
-        # Both /etc config files and StateSaveLocation data are to be migrated
+        # Both leader and non-leaders migrate /etc/ config files
         etc_source = Path("/etc/slurm")
-        state_save_source = Path(checkpoint_data["StateSaveLocation"])
         target = Path(HA_MOUNT_POINT)
 
         try:
@@ -67,13 +63,17 @@ class SlurmctldHA(ops.Object):
             return
 
         if not self._charm.unit.is_leader():
-            # Non-leaders do not have any more data to migrate
+            # Non-leaders have no more data to migrate
             logger.debug("storage mounted. starting unit")
-            self._charm.on.start.emit()
+            self._charm.on.start.emit()  # TODO: should this be self.framework.reemit()?
             return
 
-        # JWT key requires separate handling - it may be in the state directory
-        jwt_key_path = Path(checkpoint_data["AuthAltParameters"]["jwt_key"])
+        # The leader must also migrate StateSaveLocation data
+        config = self._charm.slurmctld.config.load()
+        state_save_source = Path(config.state_save_location)
+
+        # JWT key requires separate handling - it is in the state directory by default
+        jwt_key_path = Path(config.auth_alt_parameters["jwt_key"])
         if jwt_key_path.is_relative_to(state_save_source):
             # Given:
             #
@@ -83,9 +83,6 @@ class SlurmctldHA(ops.Object):
             #
             # jwt_key_path becomes /mnt/slurmctld-statefs/checkpoint/jwt_hs256.key
             jwt_key_path = target / jwt_key_path.relative_to(state_save_source.parent)
-            checkpoint_data["AuthAltParameters"]["jwt_key"] = str(jwt_key_path)
-
-        checkpoint_data["StateSaveLocation"] = str(target / state_save_source.name)
 
         try:
             self._migrate_state_save_location_data(state_save_source, target)
@@ -96,12 +93,13 @@ class SlurmctldHA(ops.Object):
             event.defer()
             return
 
-        # Update configs to the new path only if sync was successful
-        self._charm.set_jwt_path(jwt_key_path)
-        self._charm._slurmctld_peer.checkpoint_data = checkpoint_data
-        self._charm._on_write_slurm_conf(event)
-        self._charm._check_status()
-
+        # Migration has been successful, update configs to the new path and restart service
+        self._charm.slurmctld.jwt.path = jwt_key_path
+        with self._charm.slurmctld.config.edit() as config:
+            if config.auth_alt_parameters["jwt_key"] != jwt_key_path:
+                config.auth_alt_parameters["jwt_key"] = str(jwt_key_path)
+            config.state_save_location = str(target / state_save_source.name)
+        self._charm.on.start.emit()
 
     def _migrate_etc_data(self, source: Path, target: Path) -> None:
         """Migrate the given source etc directory to the given target.
@@ -152,7 +150,6 @@ class SlurmctldHA(ops.Object):
         logger.debug("symlinking %s to %s", source, target)
         source.symlink_to(target)
 
-
     def _migrate_state_save_location_data(self, source: Path, target: Path):
         """Migrate the given source StateSaveLocation directory to the given target.
 
@@ -185,13 +182,14 @@ class SlurmctldHA(ops.Object):
             logger.exception("failed initial sync of %s to %s", source, target)
             raise
 
-        self._charm._slurmctld.service.stop()
+        self._charm.slurmctld.service.stop()
 
         try:
             subprocess.check_output(rsync_cmd)
         except subprocess.CalledProcessError:
             logger.exception("failed delta sync of %s to %s", source, target)
-            self._charm._slurmctld.service.start()
+            # Immediately restart slurmctld.service on failure
+            self._charm.slurmctld.service.start()
             raise
 
-        # slurmctld.service is restarted by _on_write_slurm_conf() call after this function
+        # On success, slurmctld.service is restarted after this function, once slurm.conf is updated

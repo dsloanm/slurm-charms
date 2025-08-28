@@ -18,8 +18,8 @@
 
 import json
 import logging
-from pathlib import Path
 import secrets
+from pathlib import Path
 from typing import cast
 
 import ops
@@ -82,7 +82,7 @@ from state import (
     config_ready,
     peer_ready,
     shared_state_mounted,
-    slurmctld_installed
+    slurmctld_installed,
 )
 
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
@@ -115,6 +115,8 @@ class SlurmctldCharm(ops.CharmBase):
             self.slurmctld_peer.on.slurmctld_peer_connected,
             self._on_slurmctld_peer_connected,
         )
+        framework.observe(self.slurmctld_peer.on.slurmctld_joined, self._on_slurmctld_changed)
+        framework.observe(self.slurmctld_peer.on.slurmctld_departed, self._on_slurmctld_changed)
         self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_RELATION)
 
         self.sackd = SackdRequirer(self, SACKD_INTEGRATION_NAME)
@@ -143,6 +145,19 @@ class SlurmctldCharm(ops.CharmBase):
             dashboard_dirs=["./src/cos/grafana_dashboards"],
             recurse_rules_dirs=True,
         )
+
+        # Update JWT key path in case it has changed from migrating to a shared filesystem for HA
+        # Required to ensure path is consistent across all slurmctld units
+        if self.slurmctld.config.path.exists():
+            config = self.slurmctld.config.load()
+            new_path = Path(config.state_save_location) / self.slurmctld.jwt.path.name
+            if self.slurmctld.jwt.path != new_path:
+                logger.info(
+                    "StateSaveLocation migration occurred. updating JWT key path from %s to %s",
+                    self.slurmctld.jwt.path,
+                    new_path,
+                )
+                self.slurmctld.jwt.path = new_path
 
     @refresh
     def _on_install(self, event: ops.InstallEvent) -> None:
@@ -187,21 +202,22 @@ class SlurmctldCharm(ops.CharmBase):
     @reconfigure
     def _on_leader_elected(self, event: ops.LeaderElectedEvent) -> None:
         """Refresh controller lists on leader re-election."""
+        if not self.slurmctld.config.exists():
+            logger.debug("slurm.conf not ready. skipping event")
+            return
+
         # Refresh only if in an HA setup with a shared SaveStateLocation
         # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
         config = self.slurmctld.config.load()
         state_save_parent = Path(config.state_save_location).parent
         if not state_save_parent.is_mount():
-            logger.debug("%s is not a mounted file system. HA is not enabled. skipping event", state_save_parent)
+            logger.debug(
+                "%s is not a mounted file system. HA is not enabled. skipping event",
+                state_save_parent,
+            )
             return
 
-        # sackd and slurmd must be informed of any changes to the controller list
-        # slurmrestd gets the updated config via the reconfigure hook
-        new_controllers = self.get_controllers()
-        with self.slurmctld.config.edit() as config:
-            config.slurmctld_host = new_controllers
-        self.sackd.set_controller_data(ControllerData(controllers=new_controllers))
-        self.slurmd.set_controller_data(ControllerData(controllers=new_controllers))
+        self._refresh_controllers()
 
     @refresh
     @wait_unless(cluster_name_set, peer_ready)
@@ -248,38 +264,37 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
         """Check status of the `slurmctld` application."""
 
+    @leader
     @refresh
     def _on_slurmctld_peer_connected(self, _: SlurmctldPeerConnectedEvent) -> None:
         """Handle when `slurmctld` peer integration is created."""
+        # Don't overwrite an existing cluster name
+        if self.slurmctld_peer.cluster_name:
+            return
+
         self.slurmctld_peer.cluster_name = (
             cluster_name
             if (cluster_name := self.config.get("cluster-name", "")) != ""
             else f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
         )
 
-        self.slurmctld_peer.hostname = self.slurmctld.hostname
-
     @refresh
     @reconfigure
     def _on_slurmctld_changed(self, event) -> None:
-        """Update slurmctld configuration and list of controllers on all relevant Slurm services."""
-        # Only a slurm.conf update needed. New slurmctld controllers joining or leaving do not
-        # change any other conf file.
+        """Handle when `slurmctld` units join or leave."""
+        # Only a slurm.conf update needed - no other conf files are affected.
         # slurmrestd gets the updated config via the reconfigure hook
-        new_controllers = self.get_controllers()
-        with self.slurmctld.config.edit() as config:
-            config.slurmctld_host = new_controllers
-        self.sackd.set_controller_data(ControllerData(controllers=new_controllers))
-        self.slurmd.set_controller_data(ControllerData(controllers=new_controllers))
+        self._refresh_controllers()
 
     @refresh
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
+        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self.get_controllers()]
         self.sackd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
-                controllers=self.get_controllers(),
+                controllers=new_endpoints,
             ),
             integration_id=event.relation.id,
         )
@@ -308,21 +323,31 @@ class SlurmctldCharm(ops.CharmBase):
         except ModelError:
             pass
 
+        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self.get_controllers()]
         self.slurmd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
-                controllers=self.get_controllers(),
+                controllers=new_endpoints,
                 nhc_args=cast(str, self.config.get("health-check-params", "")),
             ),
             integration_id=event.relation.id,
         )
 
-    @leader
     @refresh
     @reconfigure
     @block_unless(slurmctld_installed)
     def _on_slurmd_disconnected(self, event: SlurmdDisconnectedEvent) -> None:
         """Handle when a `slurmd` application is disconnected."""
+        # Avoid partition being cleared in an HA setup when leader is removed before other units
+        # Proceed only if all units are departing/application is being scaled to 0.
+        # TODO: This should work whether it's the `slurmctld` leader departing or the slurmd
+        # partition being removed but needs confirmation
+        if not event.app.planned_units() == 0:
+            logger.debug(
+                "skipping partition removal. application units are still present",
+            )
+            return
+
         data = self.slurmd.get_compute_data(event.relation.id)
         include = f"slurm.conf.{data.partition.partition_name}"
 
@@ -346,7 +371,6 @@ class SlurmctldCharm(ops.CharmBase):
             integration_id=event.relation.id,
         )
 
-    @leader
     @refresh
     @reconfigure
     @wait_unless(database_ready, all_units_observed)
@@ -389,7 +413,6 @@ class SlurmctldCharm(ops.CharmBase):
         except ValueError:
             pass
 
-    @leader
     @refresh
     @wait_unless(database_ready, config_ready)
     @block_unless(slurmctld_installed)
@@ -505,8 +528,17 @@ class SlurmctldCharm(ops.CharmBase):
 
         event.set_results({"status": "resuming", "nodes": nodes})
 
+    def _refresh_controllers(self) -> None:
+        """Refresh the list of controllers in slurm.conf and relevant Slurm services."""
+        new_controllers = self.get_controllers()
+        with self.slurmctld.config.edit() as config:
+            config.slurmctld_host = new_controllers
+        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in new_controllers]
+        self.sackd.set_controller_data(ControllerData(controllers=new_endpoints))
+        self.slurmd.set_controller_data(ControllerData(controllers=new_endpoints))
+
     def get_controllers(self) -> list[str]:
-        """Get endpoints (hostname:port) for all controllers."""
+        """Get hostnames for all controllers."""
         # Read the current list of controllers from the slurm.conf file and compare with the
         # controllers currently in the peer relation.
         # File ordering must be preserved as it dictates which slurmctld instance is the primary and
@@ -525,8 +557,8 @@ class SlurmctldCharm(ops.CharmBase):
         # Controllers in the file but not the peer relation have departed.
         # Controllers in the peer relation but not the file are newly added.
         from_file_set = set(from_file)
-        current_controllers = [f"{c}:{SLURMCTLD_PORT}" for c in from_file if c in from_peer] + [
-            f"{c}:{SLURMCTLD_PORT}" for c in from_peer if c not in from_file_set
+        current_controllers = [c for c in from_file if c in from_peer] + [
+            c for c in from_peer if c not in from_file_set
         ]
 
         logger.debug("current controllers: %s", current_controllers)

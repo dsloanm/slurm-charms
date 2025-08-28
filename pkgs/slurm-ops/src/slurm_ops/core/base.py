@@ -517,6 +517,11 @@ class _JWTSecretManager(SecretManager):
         """Get the path to the `jwt_hs256.key` secret file."""
         return self._file
 
+    @path.setter
+    def path(self, new_path: str) -> None:
+        """Set the path to the `jwt_hs256.key` secret file."""
+        self._file = Path(new_path)
+
 
 class _SlurmSecretManager(SecretManager):
     """Manage the `slurm.key` secret file."""
@@ -545,6 +550,11 @@ class _SlurmSecretManager(SecretManager):
     def path(self) -> Path:
         """Get the path to the `slurm.key` secret file."""
         return self._file
+
+    @path.setter
+    def path(self, new_path: str) -> None:
+        """Set the path to the `slurm.key` secret file."""
+        self._file = Path(new_path)
 
 
 class PrometheusExporterManager:

@@ -78,37 +78,44 @@ def shared_state_mounted(charm: "SlurmctldCharm") -> ConditionEvaluation:
     config = charm.slurmctld.config.load()
     state_save_parent = Path(config.state_save_location).parent
     if not state_save_parent.is_mount():
-        return ConditionEvaluation(False, "A shared file system must be provided to enable `slurmctld` high availability")
+        return ConditionEvaluation(
+            False, "A shared file system must be provided to enable `slurmctld` high availability"
+        )
 
     return ConditionEvaluation(True, "")
 
 
 def peer_ready(charm: "SlurmctldCharm") -> ConditionEvaluation:
-        """Check that this peer/non-leader can become active.
+    """Check that this peer/non-leader can become active.
 
-        These conditions must be satisfied:
-        - slurm.conf exists
-        - slurm.conf includes this unit's hostname
-        - auth key exists
-        - JWT key exists
-        """
-        if charm.unit.is_leader():
-            return ConditionEvaluation(True, "")
-
-        if not charm.slurmctld.config.path.exists():
-            return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.config.path}")
-
-        config = charm.slurmctld.config.load()
-        if charm.slurmctld.hostname not in config.slurmctld_host:
-            return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.hostname} to be added to {charm.slurmctld.config.path}")
-
-        if not charm.slurmctld.key.path.exists():
-            return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.key.path}")
-
-        if not charm.slurmctld.jwt.path.exists():
-            return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.jwt.path}")
-
+    These conditions must be satisfied:
+    - slurm.conf exists
+    - slurm.conf includes this unit's hostname
+    - auth key exists
+    - JWT key exists
+    """
+    if charm.unit.is_leader():
         return ConditionEvaluation(True, "")
+
+    # Cannot use `config_ready` as that would block the leader from generating the initial
+    # slurm.conf
+    if not charm.slurmctld.config.path.exists():
+        return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.config.path}")
+
+    config = charm.slurmctld.config.load()
+    if charm.slurmctld.hostname not in config.slurmctld_host:
+        return ConditionEvaluation(
+            False,
+            f"Waiting for {charm.slurmctld.hostname} to be added to {charm.slurmctld.config.path}",
+        )
+
+    if not charm.slurmctld.key.path.exists():
+        return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.key.path}")
+
+    if not charm.slurmctld.jwt.path.exists():
+        return ConditionEvaluation(False, f"Waiting for {charm.slurmctld.jwt.path}")
+
+    return ConditionEvaluation(True, "")
 
 
 def slurmctld_ready(charm: "SlurmctldCharm") -> bool:
@@ -143,8 +150,9 @@ def check_slurmctld(charm: "SlurmctldCharm") -> ops.StatusBase:
 
     try:
         status = charm.get_controller_status(charm.slurmctld.hostname)
-    except:
-        # Failure to query controller active status
+    except Exception:
+        # Ignore any failure to query controller active status
+        # TODO: logging
         status = ""
 
     return ops.ActiveStatus(status)
