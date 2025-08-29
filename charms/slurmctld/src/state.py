@@ -151,8 +151,7 @@ def check_slurmctld(charm: "SlurmctldCharm") -> ops.StatusBase:
     try:
         status = charm.get_controller_status(charm.slurmctld.hostname)
     except Exception:
-        # Ignore any failure to query controller active status
-        # TODO: logging
+        # Ignore any failure when querying controller active status
         status = ""
 
     return ops.ActiveStatus(status)

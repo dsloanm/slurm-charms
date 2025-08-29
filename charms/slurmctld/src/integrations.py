@@ -169,7 +169,6 @@ class SlurmctldPeer(Interface):
                 _logger.debug(
                     "leader is departing. next elected leader will refresh controller config"
                 )
-                # self.charm.slurmctld.service.stop() TODO: confirm if this is needed
                 return
 
             self.on.slurmctld_departed.emit(event.relation)

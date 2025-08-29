@@ -161,16 +161,6 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
     if not slurmctld_ready(charm):
         return
 
-    try:
-        scontrol("reconfigure")
-    except SlurmOpsError as e:
-        _logger.error(e.message)
-        raise StopCharm(
-            ops.BlockedStatus(
-                "Failed to apply new Slurm configuration. See `juju debug-log` for details"
-            )
-        )
-
     # In an HA setup, all slurmctld services across all hosts must be restarted to ensure
     # SlurmctldHost lines are reloaded from slurm.conf.
     # `scontrol reconfigure` alone does not reload SlurmctldHost.
@@ -182,6 +172,12 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
     #   - A experiences availability issues.
     #   - B attempts to take over, despite not being in SlurmctldHost, and fails.
     #   - Slurm client commands now fail.
+    #
+    # This restart must occur before `scontrol reconfigure` in case the primary `slurmctld` has been
+    # removed and this unit is a backup being promoted to the new primary. The service restart will
+    # ensure `slurmctld.service` is not in standby mode, avoiding thie following error:
+    #   '['scontrol', 'reconfigure']' failed with exit code 1. reason: slurm_reconfigure error:
+    #   Slurm backup controller in standby mode
     try:
         charm.slurmctld.service.restart()
     except SlurmOpsError as e:
@@ -192,6 +188,16 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
             )
         )
     charm.slurmctld_peer.signal_slurmctld_restart()
+
+    try:
+        scontrol("reconfigure")
+    except SlurmOpsError as e:
+        _logger.error(e.message)
+        raise StopCharm(
+            ops.BlockedStatus(
+                "Failed to apply new Slurm configuration. See `juju debug-log` for details"
+            )
+        )
 
     if charm.slurmrestd.is_joined():
         charm.slurmrestd.set_controller_data(

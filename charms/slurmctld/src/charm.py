@@ -338,16 +338,6 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmd_disconnected(self, event: SlurmdDisconnectedEvent) -> None:
         """Handle when a `slurmd` application is disconnected."""
-        # Avoid partition being cleared in an HA setup when leader is removed before other units
-        # Proceed only if all units are departing/application is being scaled to 0.
-        # TODO: This should work whether it's the `slurmctld` leader departing or the slurmd
-        # partition being removed but needs confirmation
-        if not event.app.planned_units() == 0:
-            logger.debug(
-                "skipping partition removal. application units are still present",
-            )
-            return
-
         data = self.slurmd.get_compute_data(event.relation.id)
         include = f"slurm.conf.{data.partition.partition_name}"
 
@@ -409,7 +399,7 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmctld.acct_gather.delete()
         try:
             with self.slurmctld.config.edit() as config:
-                config.includes.remove(PROFILING_CONFIG_FILE)
+                config.include.remove(PROFILING_CONFIG_FILE)
         except ValueError:
             pass
 
@@ -528,14 +518,50 @@ class SlurmctldCharm(ops.CharmBase):
 
         event.set_results({"status": "resuming", "nodes": nodes})
 
+    def _merge_controller_data(self, app: SackdRequirer | SlurmdRequirer, new_endpoints) -> None:
+        """Merge new controller endpoints with existing controller data."""
+        for integration in app.integrations:
+            current = integration.load(ControllerData, self.app)
+            logger.debug(
+                "existing data for %s integration %s: %s",
+                app._integration_name,
+                integration,
+                current,
+            )
+
+            data = ControllerData(
+                auth_key=current.auth_key,
+                auth_key_id=current.auth_key_id,
+                controllers=new_endpoints,  # Update only the controllers
+                jwt_key=current.jwt_key,
+                jwt_key_id=current.jwt_key_id,
+                nhc_args=current.nhc_args,
+                slurmconfig=current.slurmconfig,
+            )
+
+            logger.debug(
+                "updating %s integration %s with new data: %s",
+                app._integration_name,
+                integration,
+                data,
+            )
+            app.set_controller_data(data, integration_id=integration.id)
+
     def _refresh_controllers(self) -> None:
-        """Refresh the list of controllers in slurm.conf and relevant Slurm services."""
+        """Refresh the list of controllers in slurm.conf and relevant Slurm services.
+
+        Notes:
+            - This function must only be called by a hook with a @reconfigure decorator to ensure
+              slurmrestd is also updated with the new Slurm configuration.
+        """
         new_controllers = self.get_controllers()
         with self.slurmctld.config.edit() as config:
             config.slurmctld_host = new_controllers
+
+        # sackd and slurmd require a list of endpoints (host:port), rather than just hostnames
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in new_controllers]
-        self.sackd.set_controller_data(ControllerData(controllers=new_endpoints))
-        self.slurmd.set_controller_data(ControllerData(controllers=new_endpoints))
+        self._merge_controller_data(self.sackd, new_endpoints)
+        self._merge_controller_data(self.slurmd, new_endpoints)
 
     def get_controllers(self) -> list[str]:
         """Get hostnames for all controllers."""

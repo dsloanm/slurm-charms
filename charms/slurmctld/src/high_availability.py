@@ -65,7 +65,7 @@ class SlurmctldHA(ops.Object):
         if not self._charm.unit.is_leader():
             # Non-leaders have no more data to migrate
             logger.debug("storage mounted. starting unit")
-            self._charm.on.start.emit()  # TODO: should this be self.framework.reemit()?
+            self._charm.on.start.emit()
             return
 
         # The leader must also migrate StateSaveLocation data
