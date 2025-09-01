@@ -22,11 +22,10 @@ from constants import (
     DEFAULT_CGROUP_CONFIG,
     DEFAULT_SLURM_CONFIG,
     OVERRIDES_CONFIG_FILE,
-    PEER_INTEGRATION_NAME,
 )
 from hpc_libs.interfaces import ControllerData
 from hpc_libs.is_container import is_container
-from hpc_libs.utils import StopCharm, get_ingress_address, plog
+from hpc_libs.utils import StopCharm, plog
 from slurm_ops import SlurmOpsError, scontrol
 from slurmutils import CGroupConfig, ModelError, SlurmConfig
 from state import slurmctld_ready
@@ -47,9 +46,7 @@ def init_config(charm: "SlurmctldCharm") -> None:
     # Seed the `slurm.conf` configuration file.
     config = SlurmConfig(
         clustername=charm.slurmctld_peer.cluster_name,
-        slurmctldhost=[
-            charm.slurmctld.hostname + f"({get_ingress_address(charm, PEER_INTEGRATION_NAME)})",
-        ],
+        slurmctldhost=charm.get_controllers(),
         **DEFAULT_SLURM_CONFIG,
     )
     charm.slurmctld.config.dump(config)
@@ -59,8 +56,6 @@ def init_config(charm: "SlurmctldCharm") -> None:
     # This "odd" context manager invocation enables us to ensure that the `slurm.conf.<include>`
     # file is created, but not overwrite any pre-existing content if `_on_start` is called
     # after the initial charm deployment sequence.
-    #
-    # It's one less "look before you leap" if-else tree that I want to destroy with fiery hatred.
     for config in DEFAULT_SLURM_CONFIG["include"]:
         with charm.slurmctld.config.includes[config].edit() as _:
             pass
@@ -165,6 +160,34 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
     """
     if not slurmctld_ready(charm):
         return
+
+    # In an HA setup, all slurmctld services across all hosts must be restarted to ensure
+    # SlurmctldHost lines are reloaded from slurm.conf.
+    # `scontrol reconfigure` alone does not reload SlurmctldHost.
+    # If a restart is not done, removal of a controller will result in a malfunctioning cluster.
+    #
+    # Example: 3 controllers A (primary), B (backup1), C (backup2).
+    #   - The SlurmctldHost entry for B is removed from slurm.conf.
+    #   - `scontrol reconfigure` is run on A.
+    #   - A experiences availability issues.
+    #   - B attempts to take over, despite not being in SlurmctldHost, and fails.
+    #   - Slurm client commands now fail.
+    #
+    # This restart must occur before `scontrol reconfigure` in case the primary `slurmctld` has been
+    # removed and this unit is a backup being promoted to the new primary. The service restart will
+    # ensure `slurmctld.service` is not in standby mode, avoiding the following error:
+    #   '['scontrol', 'reconfigure']' failed with exit code 1. reason: slurm_reconfigure error:
+    #   Slurm backup controller in standby mode
+    try:
+        charm.slurmctld.service.restart()
+    except SlurmOpsError as e:
+        _logger.error(e.message)
+        raise StopCharm(
+            ops.BlockedStatus(
+                "Failed to restart `slurmctld.service`. See `juju debug-log` for details"
+            )
+        )
+    charm.slurmctld_peer.signal_slurmctld_restart()
 
     try:
         scontrol("reconfigure")
