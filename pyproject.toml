@@ -70,7 +70,7 @@ members = [
 [tool.uv.sources]
 slurm-ops = { workspace = true }
 ubuntu-drivers-common = { git = "https://github.com/canonical/ubuntu-drivers-common", rev = "554b91edfd3699625dbed90f679abb31a897b76e" }
-hpc-libs = { git = "https://github.com/charmed-hpc/hpc-libs", rev = "d11f93a471246b82572e84522becaec192570578" }
+hpc-libs = { git = "https://github.com/charmed-hpc/hpc-libs", rev = "0363b8b56985dd527892f4edda152c9cfa4085ee" }
 
 [tool.uv]
 dependency-metadata = [{ name = "ubuntu-drivers-common", version = "0.10.0" }]
@@ -81,6 +81,7 @@ external-libraries = [
     { lib = "operator-libs-linux.systemd", version = "1.4" },
     { lib = "data-platform-libs.data_interfaces", version = "0.41" },
     { lib = "grafana-agent.cos_agent", version = "0.20" },
+    { lib = "filesystem-client.mount_info", version = "0.1" },
 ]
 binary-packages = [
     "pydantic-core",
