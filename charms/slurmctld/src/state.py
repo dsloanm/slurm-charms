@@ -73,14 +73,19 @@ def shared_state_mounted(charm: "SlurmctldCharm") -> ConditionEvaluation:
     if charm.unit.is_leader():
         return ConditionEvaluation(True, "")
 
+    failure = ConditionEvaluation(
+        False, "A shared file system must be provided to enable `slurmctld` high availability"
+    )
+
+    if not charm.slurmctld.config.path.exists():
+        return failure
+
     # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
     # e.g. "/mnt/slurmctld-statefs/checkpoint" => check if "/mnt/slurmctld-statefs" is a mount
     config = charm.slurmctld.config.load()
     state_save_parent = Path(config.state_save_location).parent
     if not state_save_parent.is_mount():
-        return ConditionEvaluation(
-            False, "A shared file system must be provided to enable `slurmctld` high availability"
-        )
+        return failure
 
     return ConditionEvaluation(True, "")
 

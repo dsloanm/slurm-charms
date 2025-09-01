@@ -25,6 +25,7 @@ import tenacity
 from constants import (
     CEPHFS_SERVER_PROXY_APP_NAME,
     DEFAULT_FILESYSTEM_CHARM_CHANNEL,
+    DEFAULT_SLURM_CHARM_CHANNEL,
     FILESYSTEM_CLIENT_APP_NAME,
     MICROCEPH_APP_NAME,
     SACKD_APP_NAME,
@@ -628,51 +629,60 @@ def test_slurmctld_sackd_scale_up(juju: jubilant.Juju) -> None:
     retry_asserts()
 
 
-# TODO: restore these tests once dynamic nodes work is complete
-# @pytest.mark.order(23)
-# def test_new_partition_deploy(juju: jubilant.Juju, base, slurmd) -> None:
-#     """Test deploying a new partition in an HA setup."""
-#     new_compute_application = "new-compute"
-#     new_compute_unit = f"{new_compute_application}/0"
+@pytest.mark.order(23)
+def test_new_partition_deploy(juju: jubilant.Juju, base, slurmd) -> None:
+    """Test deploying a new partition in an HA setup."""
+    new_compute_application = "new-compute"
+    new_compute_unit = f"{new_compute_application}/0"
 
-#     logger.info("adding new partition: %s", new_compute_application)
-#     juju.deploy(
-#         slurmd,
-#         new_compute_application,
-#         base=base,
-#         channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmd, str) else None,
-#     )
-#     juju.integrate(new_compute_application, SLURMCTLD_APP_NAME)
-#     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
+    logger.info("adding new partition: %s", new_compute_application)
+    juju.deploy(
+        slurmd,
+        new_compute_application,
+        base=base,
+        channel=DEFAULT_SLURM_CHARM_CHANNEL if isinstance(slurmd, str) else None,
+    )
+    juju.integrate(new_compute_application, SLURMCTLD_APP_NAME)
+    juju.wait(
+        lambda status: jubilant.all_active(status, new_compute_application, *SLURM_APPS),
+        timeout=SLURM_WAIT_TIMEOUT,
+    )
 
-#     logger.info("testing that the `node-configured` charm action makes node status 'idle'")
-#     juju.run(new_compute_unit, "node-configured")
-#     state = juju.exec(f"sinfo | grep {new_compute_application} | awk '{{print $5}}' | tr -d '\n'", unit=new_compute_unit)
-#     assert state.stdout == "idle"
+    logger.info("testing that the `node-configured` charm action makes node status 'idle'")
+    juju.run(new_compute_unit, "node-configured")
+    state = juju.exec(
+        f"sinfo | grep {new_compute_application} | awk '{{print $5}}' | tr -d '\n'",
+        unit=new_compute_unit,
+    )
+    assert state.stdout == "idle"
 
 
-# @pytest.mark.order(24)
-# def test_remove_partition(juju: jubilant.Juju) -> None:
-#     """Test removing a partition in an HA setup."""
-#     new_compute_application = "new-compute"
-#     controllers = _get_slurm_controllers(juju)
-#     assert_pinged(
-#         controllers,
-#         {
-#             "primary": "UP",
-#             "backup": "UP",
-#         },
-#     )
+@pytest.mark.order(24)
+def test_remove_partition(juju: jubilant.Juju) -> None:
+    """Test removing a partition in an HA setup."""
+    new_compute_application = "new-compute"
+    controllers = _get_slurm_controllers(juju)
+    assert_pinged(
+        controllers,
+        {
+            "primary": "UP",
+            "backup": "UP",
+        },
+    )
 
-#     logger.info("removing partition: %s", new_compute_application)
-#     juju.remove_application(new_compute_application)
-#     juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS), timeout=SLURM_WAIT_TIMEOUT)
+    logger.info("removing partition: %s", new_compute_application)
+    juju.remove_application(new_compute_application)
+    juju.wait(
+        lambda status: new_compute_application not in status.apps
+        and jubilant.all_active(status, *SLURM_APPS),
+        timeout=SLURM_WAIT_TIMEOUT,
+    )
 
-#     new_controllers = _get_slurm_controllers(juju)
-#     assert_pinged(
-#         new_controllers,
-#         {
-#             "primary": "UP",
-#             "backup": "UP",
-#         },
-#     )
+    new_controllers = _get_slurm_controllers(juju)
+    assert_pinged(
+        new_controllers,
+        {
+            "primary": "UP",
+            "backup": "UP",
+        },
+    )

@@ -175,7 +175,7 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
     #
     # This restart must occur before `scontrol reconfigure` in case the primary `slurmctld` has been
     # removed and this unit is a backup being promoted to the new primary. The service restart will
-    # ensure `slurmctld.service` is not in standby mode, avoiding thie following error:
+    # ensure `slurmctld.service` is not in standby mode, avoiding the following error:
     #   '['scontrol', 'reconfigure']' failed with exit code 1. reason: slurm_reconfigure error:
     #   Slurm backup controller in standby mode
     try:

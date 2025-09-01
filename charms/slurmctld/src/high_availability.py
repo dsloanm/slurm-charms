@@ -40,7 +40,7 @@ class SlurmctldHA(ops.Object):
         """Handle filesystem-client connected event."""
         for relation in self._mount.relations:
             self._mount.set_mount_info(relation.id, MountInfo(mountpoint=HA_MOUNT_POINT))
-        status_message = f"requesting file system mount: {HA_MOUNT_POINT}"
+        status_message = f"Requesting file system mount: {HA_MOUNT_POINT}"
         logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 
@@ -169,7 +169,7 @@ class SlurmctldHA(ops.Object):
             )
             return
 
-        status_message = f"migrating {source} to {target}"
+        status_message = f"Migrating {source} to {target}"
         logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 

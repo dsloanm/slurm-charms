@@ -24,12 +24,15 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import overload
+from typing import TYPE_CHECKING, overload
 
 import ops
 from hpc_libs.interfaces.base import Interface
 from hpc_libs.utils import leader, plog
 from state import all_units_observed
+
+if TYPE_CHECKING:
+    from charm import SlurmctldCharm
 
 _logger = logging.getLogger(__name__)
 
@@ -61,7 +64,7 @@ class ControllerPeerUnitData:
 def unit_data_decoder(value: str) -> str:
     # `relation.load()`'s default value decoder is json.loads. It is not able to decode the default
     # IP addresses in the unit databag.
-    # E.g. The unit databag, by default, contains an entry like 'ingress-address': '10.200.245.215'.
+    # E.g. the unit databag, by default, contains an entry like 'ingress-address': '10.200.245.215'.
     # This causes json.loads to fail:
     #
     # >>> json.loads("10.200.245.215")
@@ -100,8 +103,9 @@ class SlurmctldPeer(Interface):
 
     on = _SlurmctldPeerEvents()  # type: ignore
     _stored = ops.StoredState()
+    charm: "SlurmctldCharm"
 
-    def __init__(self, charm: ops.CharmBase, integration_name: str) -> None:
+    def __init__(self, charm: "SlurmctldCharm", integration_name: str) -> None:
         super().__init__(charm, integration_name)
 
         self._stored.set_default(
@@ -132,18 +136,13 @@ class SlurmctldPeer(Interface):
         self.on.slurmctld_peer_connected.emit(event.relation)
 
     def _on_relation_changed(self, event: ops.RelationChangedEvent) -> None:
-        """Handle when `slurmctld` peer integration data is changed.
-
-        Handles when:
-          - A slurmctld.service restart signal has been sent by the leader.
-          - Unit(s) have joined the relation.
-        """
+        """Handle when `slurmctld` peer integration data is changed."""
         data = self.get_controller_peer_app_data()
         if not data:
             _logger.debug("no application data set in peer relation. ignoring change event")
             return
 
-        # - A slurmctld.service restart signal has been sent by the leader.
+        # A slurmctld.service restart signal has been sent by the leader.
         if data.restart_signal != self._stored.last_restart_signal:
             _logger.debug("restart signal found. restarting slurmctld")
             self._stored.last_restart_signal = data.restart_signal
@@ -154,7 +153,7 @@ class SlurmctldPeer(Interface):
                 self.charm.on.start.emit()
             return
 
-        # - Unit(s) have joined the relation.
+        # Unit(s) have joined the relation.
         # Fire once the leader unit has observed relation-joined for all units
         if self.unit.is_leader() and all_units_observed(self.charm).ok:
             self.on.slurmctld_joined.emit(event.relation)
@@ -181,14 +180,14 @@ class SlurmctldPeer(Interface):
         self,
         target: ops.Application,
         data_type: type[ControllerPeerAppData],
-        decoder,
+        decoder=None,
     ) -> ControllerPeerAppData: ...
     @overload
     def _get_peer_data(
         self,
         target: ops.Unit,
         data_type: type[ControllerPeerUnitData],
-        decoder,
+        decoder=None,
     ) -> ControllerPeerUnitData: ...
 
     def _get_peer_data(
@@ -328,7 +327,7 @@ class SlurmctldPeer(Interface):
         This ensures a valid controller is returned when integrations with other applications, such
         as slurmd or sackd, occur first.
         """
-        # self.hostname fails if relation not yet established
+        # Need self.charm.slurmctld.hostname as self.hostname fails if relation not yet established
         controllers = {self.charm.slurmctld.hostname}
 
         integration = self.get_integration()

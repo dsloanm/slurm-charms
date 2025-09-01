@@ -152,12 +152,12 @@ class SlurmctldCharm(ops.CharmBase):
             config = self.slurmctld.config.load()
             new_path = Path(config.state_save_location) / self.slurmctld.jwt.path.name
             if self.slurmctld.jwt.path != new_path:
-                logger.info(
+                logger.debug(
                     "StateSaveLocation migration occurred. updating JWT key path from %s to %s",
                     self.slurmctld.jwt.path,
                     new_path,
                 )
-                self.slurmctld.jwt.path = new_path
+                self.slurmctld.jwt.path = str(new_path)
 
     @refresh
     def _on_install(self, event: ops.InstallEvent) -> None:
@@ -220,8 +220,8 @@ class SlurmctldCharm(ops.CharmBase):
         self._refresh_controllers()
 
     @refresh
-    @wait_unless(cluster_name_set, peer_ready)
     @block_unless(slurmctld_installed, shared_state_mounted)
+    @wait_unless(cluster_name_set, peer_ready)
     def _on_start(self, event: ops.StartEvent) -> None:
         """Write slurm.conf and start `slurmctld` service.
 
@@ -530,10 +530,10 @@ class SlurmctldCharm(ops.CharmBase):
             )
 
             data = ControllerData(
-                auth_key=current.auth_key,
+                auth_key="",  # Don't set keys here or secrets will be replaced with "***"
                 auth_key_id=current.auth_key_id,
                 controllers=new_endpoints,  # Update only the controllers
-                jwt_key=current.jwt_key,
+                jwt_key="",
                 jwt_key_id=current.jwt_key_id,
                 nhc_args=current.nhc_args,
                 slurmconfig=current.slurmconfig,
