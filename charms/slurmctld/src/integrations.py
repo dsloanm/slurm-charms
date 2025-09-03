@@ -267,7 +267,7 @@ class SlurmctldPeer(Interface):
         """Get controller peer from the `slurmctld-peer` application databag."""
         return self._get_peer_data(self.app, ControllerPeerAppData)
 
-    def update_controller_peer_unit_data(self, hostname: str | None = None) -> None:
+    def update_controller_peer_unit_data(self, *, hostname: str | None = None) -> None:
         """Update the controller peer data in this unit's databag.
 
         Only updates fields that are not None.
