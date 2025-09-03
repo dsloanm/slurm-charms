@@ -109,7 +109,7 @@ class SlurmctldPeer(Interface):
         super().__init__(charm, integration_name)
 
         self._stored.set_default(
-            last_restart_signal=str(),  # nonce to indicate slurmctld.service restart required
+            last_restart_signal=str(),  # nonce to indicate slurmctld service restart required
         )
 
         self.charm.framework.observe(
