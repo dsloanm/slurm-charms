@@ -35,7 +35,7 @@ from constants import (
     ACCOUNTING_CONFIG_FILE,
     CLUSTER_NAME_PREFIX,
     DEFAULT_PROFILING_CONFIG,
-    HA_MOUNT_RELATION,
+    HA_MOUNT_INTEGRATION_NAME,
     OCI_RUNTIME_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PROFILING_CONFIG_FILE,
@@ -122,7 +122,7 @@ class SlurmctldCharm(ops.CharmBase):
         )
         framework.observe(self.slurmctld_peer.on.slurmctld_joined, self._on_slurmctld_changed)
         framework.observe(self.slurmctld_peer.on.slurmctld_departed, self._on_slurmctld_changed)
-        self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_RELATION)
+        self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_INTEGRATION_NAME)
 
         self.sackd = SackdRequirer(self, SACKD_INTEGRATION_NAME)
         framework.observe(self.sackd.on.sackd_connected, self._on_sackd_connected)
