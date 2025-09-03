@@ -82,20 +82,20 @@ class SlurmctldPeerConnectedEvent(ops.RelationEvent):
     """Event emitted when `slurmctld` is connected to the peer integration."""
 
 
-class SlurmctldJoinedEvent(ops.RelationEvent):
-    """Emitted when a new `slurmctld` controller instance joins."""
+class SlurmctldPeerJoinedEvent(ops.RelationEvent):
+    """Emitted when a new `slurmctld` controller instance joins the peer integration."""
 
 
-class SlurmctldDepartedEvent(ops.RelationEvent):
-    """Emitted when a controller leaves."""
+class SlurmctldPeerDepartedEvent(ops.RelationEvent):
+    """Emitted when a `slurmctld` controller leaves the peer integration."""
 
 
 class _SlurmctldPeerEvents(ops.CharmEvents):
     """`slurmctld` peer events."""
 
     slurmctld_peer_connected = ops.EventSource(SlurmctldPeerConnectedEvent)
-    slurmctld_joined = ops.EventSource(SlurmctldJoinedEvent)
-    slurmctld_departed = ops.EventSource(SlurmctldDepartedEvent)
+    slurmctld_peer_joined = ops.EventSource(SlurmctldPeerJoinedEvent)
+    slurmctld_peer_departed = ops.EventSource(SlurmctldPeerDepartedEvent)
 
 
 class SlurmctldPeer(Interface):
@@ -156,7 +156,7 @@ class SlurmctldPeer(Interface):
         # Unit(s) have joined the relation.
         # Fire once the leader unit has observed relation-joined for all units
         if self.unit.is_leader() and all_units_observed(self.charm).ok:
-            self.on.slurmctld_joined.emit(event.relation)
+            self.on.slurmctld_peer_joined.emit(event.relation)
             return
 
     def _on_relation_departed(self, event: ops.RelationDepartedEvent) -> None:
@@ -170,7 +170,7 @@ class SlurmctldPeer(Interface):
                 )
                 return
 
-            self.on.slurmctld_departed.emit(event.relation)
+            self.on.slurmctld_peer_departed.emit(event.relation)
 
     # A generic function is used for getting peer data. These overloads ensure:
     #   - ControllerPeerAppData is returned from an application target

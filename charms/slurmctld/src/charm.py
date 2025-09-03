@@ -120,8 +120,8 @@ class SlurmctldCharm(ops.CharmBase):
             self.slurmctld_peer.on.slurmctld_peer_connected,
             self._on_slurmctld_peer_connected,
         )
-        framework.observe(self.slurmctld_peer.on.slurmctld_joined, self._on_slurmctld_changed)
-        framework.observe(self.slurmctld_peer.on.slurmctld_departed, self._on_slurmctld_changed)
+        framework.observe(self.slurmctld_peer.on.slurmctld_peer_joined, self._on_slurmctld_changed)
+        framework.observe(self.slurmctld_peer.on.slurmctld_peer_departed, self._on_slurmctld_changed)
         self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_INTEGRATION_NAME)
 
         self.sackd = SackdRequirer(self, SACKD_INTEGRATION_NAME)
