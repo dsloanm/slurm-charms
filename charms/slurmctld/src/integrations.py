@@ -199,14 +199,14 @@ class SlurmctldPeer(Interface):
         """Get unit or app peer data."""
         integration = self.get_integration()
         if not integration:
-            _logger.info(
+            _logger.debug(
                 "`%s` integration is not connected. no data to retrieve for '%s'",
                 self._integration_name,
                 target.name,
             )
             return None
 
-        _logger.info(
+        _logger.debug(
             "`%s` integration is connected. retrieving data for '%s'",
             self._integration_name,
             target.name,
@@ -224,14 +224,14 @@ class SlurmctldPeer(Interface):
         """Set app or unit peer data."""
         integration = self.get_integration()
         if not integration:
-            _logger.info(
+            _logger.debug(
                 "`%s` integration not connected. not setting data for '%s'",
                 self._integration_name,
                 target.name,
             )
             return
 
-        _logger.info(
+        _logger.debug(
             "`%s` integration is connected. setting data for '%s'",
             self._integration_name,
             target.name,
