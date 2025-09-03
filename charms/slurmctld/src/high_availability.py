@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import ops
-from constants import HA_MOUNT_POINT
+from constants import HA_MOUNT_LOCATION
 
 from charms.filesystem_client.v0.mount_info import (
     MountedFilesystemEvent,
@@ -39,8 +39,8 @@ class SlurmctldHA(ops.Object):
     def _on_mount_provider_connected(self, event: MountProviderConnectedEvent) -> None:
         """Handle filesystem-client connected event."""
         for relation in self._mount.relations:
-            self._mount.set_mount_info(relation.id, MountInfo(mountpoint=HA_MOUNT_POINT))
-        status_message = f"Requesting file system mount: {HA_MOUNT_POINT}"
+            self._mount.set_mount_info(relation.id, MountInfo(mountpoint=HA_MOUNT_LOCATION))
+        status_message = f"Requesting file system mount: {HA_MOUNT_LOCATION}"
         logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 
@@ -53,7 +53,7 @@ class SlurmctldHA(ops.Object):
 
         # Both leader and non-leaders migrate /etc/ config files
         etc_source = Path("/etc/slurm")
-        target = Path(HA_MOUNT_POINT)
+        target = Path(HA_MOUNT_LOCATION)
 
         try:
             self._migrate_etc_data(etc_source, target / "etc" / "slurm")
