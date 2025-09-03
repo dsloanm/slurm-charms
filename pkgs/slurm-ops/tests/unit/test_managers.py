@@ -83,9 +83,9 @@ class TestManager:
     def mock_jwt_key(self, fs: FakeFilesystem, mock_manager, snap_backend) -> SlurmManager:
         """Request a Slurm service manager with a fake `jwt_hs256.key` secret file."""
         if snap_backend:
-            fs.create_file("/var/snap/slurm/common/var/lib/slurm/checkpoint/jwt_hs256.key")
+            fs.create_file("/var/snap/slurm/common/etc/slurm/jwt_hs256.key")
         else:
-            fs.create_file("/var/lib/slurm/checkpoint/jwt_hs256.key")
+            fs.create_file("/etc/slurm/jwt_hs256.key")
 
         manager, _ = mock_manager
         manager.jwt._user = FAKE_USER

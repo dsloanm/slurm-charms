@@ -43,7 +43,7 @@ ACCOUNTING_CONFIG_FILE = "slurm.conf.accounting"
 PROFILING_CONFIG_FILE = "slurm.conf.profiling"
 OVERRIDES_CONFIG_FILE = "slurm.conf.overrides"
 DEFAULT_SLURM_CONFIG = {
-    "authaltparameters": {"jwt_key": "/var/lib/slurm/checkpoint/jwt_hs256.key"},
+    "authaltparameters": {"jwt_key": "/etc/slurm/jwt_hs256.key"},
     "authalttypes": ["auth/jwt"],
     "authtype": "auth/slurm",
     "credtype": "cred/slurm",

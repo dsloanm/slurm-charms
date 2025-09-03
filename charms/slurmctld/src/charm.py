@@ -25,6 +25,7 @@ from typing import cast
 import ops
 from config import (
     init_config,
+    get_controllers,
     reconfigure_slurmctld,
     update_cgroup_config,
     update_default_partition,
@@ -121,7 +122,9 @@ class SlurmctldCharm(ops.CharmBase):
             self._on_slurmctld_peer_connected,
         )
         framework.observe(self.slurmctld_peer.on.slurmctld_peer_joined, self._on_slurmctld_changed)
-        framework.observe(self.slurmctld_peer.on.slurmctld_peer_departed, self._on_slurmctld_changed)
+        framework.observe(
+            self.slurmctld_peer.on.slurmctld_peer_departed, self._on_slurmctld_changed
+        )
         self.slurmctld_ha = SlurmctldHA(self, HA_MOUNT_INTEGRATION_NAME)
 
         self.sackd = SackdRequirer(self, SACKD_INTEGRATION_NAME)
@@ -157,19 +160,6 @@ class SlurmctldCharm(ops.CharmBase):
             dashboard_dirs=["./src/cos/grafana_dashboards"],
             recurse_rules_dirs=True,
         )
-
-        # Update JWT key path in case it has changed from migrating to a shared filesystem for HA
-        # Required to ensure path is consistent across all slurmctld units
-        if self.slurmctld.config.path.exists():
-            config = self.slurmctld.config.load()
-            new_path = Path(config.state_save_location) / self.slurmctld.jwt.path.name
-            if self.slurmctld.jwt.path != new_path:
-                logger.debug(
-                    "StateSaveLocation migration occurred. updating JWT key path from %s to %s",
-                    self.slurmctld.jwt.path,
-                    new_path,
-                )
-                self.slurmctld.jwt.path = str(new_path)
 
     @refresh
     def _on_install(self, event: ops.InstallEvent) -> None:
@@ -303,7 +293,7 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
-        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self.get_controllers()]
+        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.sackd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
@@ -336,7 +326,7 @@ class SlurmctldCharm(ops.CharmBase):
         except ModelError:
             pass
 
-        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self.get_controllers()]
+        new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.slurmd.set_controller_data(
             ControllerData(
                 auth_key=self.slurmctld.key.get(),
@@ -588,7 +578,7 @@ class SlurmctldCharm(ops.CharmBase):
             - This function must only be called by a hook with a @reconfigure decorator to ensure
               slurmrestd is also updated with the new Slurm configuration.
         """
-        new_controllers = self.get_controllers()
+        new_controllers = get_controllers(self)
         with self.slurmctld.config.edit() as config:
             config.slurmctld_host = new_controllers
 
@@ -596,33 +586,6 @@ class SlurmctldCharm(ops.CharmBase):
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in new_controllers]
         self._merge_controller_data(self.sackd, new_endpoints)
         self._merge_controller_data(self.slurmd, new_endpoints)
-
-    def get_controllers(self) -> list[str]:
-        """Get hostnames for all controllers."""
-        # Read the current list of controllers from the slurm.conf file and compare with the
-        # controllers currently in the peer relation.
-        # File ordering must be preserved as it dictates which slurmctld instance is the primary and
-        # which are backups.
-        from_file = []
-        if self.slurmctld.config.path.exists():
-            config = self.slurmctld.config.load()
-            if config.slurmctld_host:
-                from_file = config.slurmctld_host
-        from_peer = self.slurmctld_peer.controllers
-
-        logger.debug(
-            "controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer
-        )
-
-        # Controllers in the file but not the peer relation have departed.
-        # Controllers in the peer relation but not the file are newly added.
-        from_file_set = set(from_file)
-        current_controllers = [c for c in from_file if c in from_peer] + [
-            c for c in from_peer if c not in from_file_set
-        ]
-
-        logger.debug("current controllers: %s", current_controllers)
-        return current_controllers
 
     def get_controller_status(self, hostname: str) -> str:
         """Return the status of the given controller instance, e.g. 'primary - UP'."""

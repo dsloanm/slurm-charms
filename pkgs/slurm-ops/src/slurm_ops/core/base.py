@@ -487,7 +487,7 @@ class _JWTSecretManager(SecretManager):
     """Manage the `jwt_hs256.key` secret file."""
 
     def __init__(self, ops_manager: OpsManager, /, user: str, group: str) -> None:
-        self._file = ops_manager.var_lib_path / "checkpoint" / "jwt_hs256.key"
+        self._file = ops_manager.etc_path / "jwt_hs256.key"
         self._user = user
         self._group = group
 

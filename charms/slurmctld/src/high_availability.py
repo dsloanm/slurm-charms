@@ -9,10 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from subprocess import CalledProcessError
 
-from hpc_libs.machine import call
-
 import ops
 from constants import HA_MOUNT_LOCATION
+from hpc_libs.machine import call
 
 from charms.filesystem_client.v0.mount_info import (
     MountedFilesystemEvent,
@@ -74,18 +73,6 @@ class SlurmctldHA(ops.Object):
         config = self._charm.slurmctld.config.load()
         state_save_source = Path(config.state_save_location)
 
-        # JWT key requires separate handling - it is in the state directory by default
-        jwt_key_path = Path(config.auth_alt_parameters["jwt_key"])
-        if jwt_key_path.is_relative_to(state_save_source):
-            # Given:
-            #
-            # jwt_key_path      = /var/lib/slurm/checkpoint/jwt_hs256.key
-            # state_save_source = /var/lib/slurm/checkpoint
-            # target            = /mnt/slurmctld-statefs
-            #
-            # jwt_key_path becomes /mnt/slurmctld-statefs/checkpoint/jwt_hs256.key
-            jwt_key_path = target / jwt_key_path.relative_to(state_save_source.parent)
-
         try:
             self._migrate_state_save_location_data(state_save_source, target)
         except CalledProcessError:
@@ -96,10 +83,7 @@ class SlurmctldHA(ops.Object):
             return
 
         # Migration has been successful, update configs to the new path and restart service
-        self._charm.slurmctld.jwt.path = jwt_key_path
         with self._charm.slurmctld.config.edit() as config:
-            if config.auth_alt_parameters["jwt_key"] != jwt_key_path:
-                config.auth_alt_parameters["jwt_key"] = str(jwt_key_path)
             config.state_save_location = str(target / state_save_source.name)
         self._charm.on.start.emit()
 
@@ -163,6 +147,11 @@ class SlurmctldHA(ops.Object):
                     e.g. `/var/lib/slurm/checkpoint`
             target: Path to the *parent* directory the source is migrated to,
                     e.g. `/mnt/slurmctld-statefs` to migrate to `/mnt/slurmctld-statefs/checkpoint`
+
+        Notes:
+            On the success of this function, the slurmctld service remains stopped to allow for the
+            caller to appropriately update `slurm.conf`. Once `slurm.conf` is updated, the caller
+            *must* restart the slurmctld.service.
         """
         checkpoint_target = target / source.name
         if checkpoint_target.exists() and source == checkpoint_target:
@@ -195,4 +184,4 @@ class SlurmctldHA(ops.Object):
             self._charm.slurmctld.service.start()
             raise
 
-        # On success, slurmctld.service is restarted after this function, once slurm.conf is updated
+        # On success, slurmctld.service remains stopped and must be restarted by the function caller

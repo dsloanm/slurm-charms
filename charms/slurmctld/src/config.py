@@ -46,7 +46,7 @@ def init_config(charm: "SlurmctldCharm") -> None:
     # Seed the `slurm.conf` configuration file.
     config = SlurmConfig(
         clustername=charm.slurmctld_peer.cluster_name,
-        slurmctldhost=charm.get_controllers(),
+        slurmctldhost=get_controllers(charm),
         **DEFAULT_SLURM_CONFIG,
     )
     charm.slurmctld.config.dump(config)
@@ -59,6 +59,34 @@ def init_config(charm: "SlurmctldCharm") -> None:
     for config in DEFAULT_SLURM_CONFIG["include"]:
         with charm.slurmctld.config.includes[config].edit() as _:
             pass
+
+
+def get_controllers(charm: "SlurmctldCharm") -> list[str]:
+    """Get hostnames for all controllers."""
+    # Read the current list of controllers from the slurm.conf file and compare with the
+    # controllers currently in the peer relation.
+    # File ordering must be preserved as it dictates which slurmctld instance is the primary and
+    # which are backups.
+    from_file = []
+    if charm.slurmctld.config.path.exists():
+        config = charm.slurmctld.config.load()
+        if config.slurmctld_host:
+            from_file = config.slurmctld_host
+    from_peer = charm.slurmctld_peer.controllers
+
+    _logger.debug(
+        "controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer
+    )
+
+    # Controllers in the file but not the peer relation have departed.
+    # Controllers in the peer relation but not the file are newly added.
+    from_file_set = set(from_file)
+    current_controllers = [c for c in from_file if c in from_peer] + [
+        c for c in from_peer if c not in from_file_set
+    ]
+
+    _logger.debug("current controllers: %s", current_controllers)
+    return current_controllers
 
 
 def update_cgroup_config(charm: "SlurmctldCharm") -> None:
