@@ -241,6 +241,7 @@ class SlurmctldPeer(Interface):
     @leader
     def update_controller_peer_app_data(
         self,
+        *,
         cluster_name: str | None = None,
         restart_signal: str | None = None,
     ) -> None:
