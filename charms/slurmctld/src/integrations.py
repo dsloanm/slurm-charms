@@ -22,7 +22,7 @@ __all__ = [
 
 import json
 import logging
-import time
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, overload
 
@@ -353,6 +353,6 @@ class SlurmctldPeer(Interface):
         This is a workaround for `scontrol reconfigure` not instructing all slurmctld daemons to
         re-read SlurmctldHost lines from slurm.conf.
         """
-        # Current timestamp used so a unique value is written to the relation on each call.
-        timestamp = str(time.time())
-        self.update_controller_peer_app_data(restart_signal=timestamp)
+        # The value written to the relation must be unique on each call.
+        signal = str(uuid.uuid4())
+        self.update_controller_peer_app_data(restart_signal=signal)
