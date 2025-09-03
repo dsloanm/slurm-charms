@@ -62,17 +62,16 @@ class ControllerPeerUnitData:
 
 
 def unit_data_decoder(value: str) -> str:
-    # `relation.load()`'s default value decoder is json.loads. It is not able to decode the default
-    # IP addresses in the unit databag.
-    # E.g. the unit databag, by default, contains an entry like 'ingress-address': '10.200.245.215'.
-    # This causes json.loads to fail:
-    #
-    # >>> json.loads("10.200.245.215")
-    # [...]
-    # json.decoder.JSONDecodeError: Extra data: line 1 column 7 (char 6)
-    #
-    # Hence this custom decoder which quotes unquoted strings.
-    # The IP addresses are not used but must be decoded to avoid the above error.
+    """Decode integration unit databag data.
+
+    The default encoder for `ops.Relation.load()` is `json.loads()` which incorrectly tries to
+    decode IPv4 addresses as float values. This decoder circumvents this error by quoting unquoted
+    values to convert them to strings.
+
+    The unit databag, by default, contains IP addresses such as the `ingress-address` for the unit.
+    The default `json.loads()` decoder causes an `json.decoder.JSONDecodeError: Extra data` error
+    when attempting to decode these values.
+    """
     if not (value.startswith('"') and value.endswith('"')):
         value = f'"{value}"'
     return json.loads(value)
