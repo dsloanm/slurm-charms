@@ -5,9 +5,11 @@
 
 import logging
 import shutil
-import subprocess
 from datetime import datetime
 from pathlib import Path
+from subprocess import CalledProcessError
+
+from hpc_libs.machine import call
 
 import ops
 from constants import HA_MOUNT_LOCATION
@@ -86,7 +88,7 @@ class SlurmctldHA(ops.Object):
 
         try:
             self._migrate_state_save_location_data(state_save_source, target)
-        except subprocess.CalledProcessError:
+        except CalledProcessError:
             logger.exception(
                 "failed to migrate %s to %s. deferring event", state_save_source, target
             )
@@ -175,18 +177,19 @@ class SlurmctldHA(ops.Object):
 
         # Perform initial copy of data while slurmctld.service is still running then stop and sync
         # the delta
-        rsync_cmd = f"/usr/bin/rsync --archive --delete {source} {target}".split()
+        rsync = "/usr/bin/rsync"
+        rsync_args = ["--archive", "--delete", source, target]
         try:
-            subprocess.check_output(rsync_cmd)
-        except subprocess.CalledProcessError:
+            call(rsync, *rsync_args)
+        except CalledProcessError:
             logger.exception("failed initial sync of %s to %s", source, target)
             raise
 
         self._charm.slurmctld.service.stop()
 
         try:
-            subprocess.check_output(rsync_cmd)
-        except subprocess.CalledProcessError:
+            call(rsync, *rsync_args)
+        except CalledProcessError:
             logger.exception("failed delta sync of %s to %s", source, target)
             # Immediately restart slurmctld.service on failure
             self._charm.slurmctld.service.start()
