@@ -16,6 +16,7 @@
 
 __all__ = ["SlurmctldManager"]
 
+import json
 from slurmutils import (
     AcctGatherConfigEditor,
     CGroupConfigEditor,
@@ -24,6 +25,7 @@ from slurmutils import (
     SlurmConfigEditor,
 )
 
+from slurm_ops import scontrol
 from slurm_ops.core import SLURM_GROUP, SLURM_USER, SlurmConfigManager, SlurmManager
 
 
@@ -81,6 +83,38 @@ class SlurmctldManager(SlurmManager):
             for partition in config.partitions.values():
                 if partition.default:
                     return partition.partition_name
+
+        return ""
+
+    def get_controller_status(self) -> str:
+        """Return the status of the current controller instance."""
+        # Example snippet of ping output:
+        #   "pings": [
+        #     {
+        #       "hostname": "juju-829e74-84",
+        #       "pinged": "DOWN",
+        #       "latency": 123,
+        #       "mode": "primary"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-85",
+        #       "pinged": "UP",
+        #       "latency": 456,
+        #       "mode": "backup1"
+        #     },
+        #     {
+        #       "hostname": "juju-829e74-86",
+        #       "pinged": "UP",
+        #       "latency": 789,
+        #       "mode": "backup2"
+        #     }
+        #   ],
+        stdout, _ = scontrol("ping", "--json")
+        ping_output = json.loads(stdout)
+
+        for ping in ping_output["pings"]:
+            if ping["hostname"] == self.hostname:
+                return f"{ping['mode']} - {ping['pinged']}"
 
         return ""
 

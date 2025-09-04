@@ -16,7 +16,6 @@
 
 """Charmed operator for `slurmctld`, Slurm's controller service."""
 
-import json
 import logging
 import secrets
 from pathlib import Path
@@ -24,8 +23,8 @@ from typing import cast
 
 import ops
 from config import (
-    init_config,
     get_controllers,
+    init_config,
     reconfigure_slurmctld,
     update_cgroup_config,
     update_default_partition,
@@ -586,39 +585,6 @@ class SlurmctldCharm(ops.CharmBase):
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in new_controllers]
         self._merge_controller_data(self.sackd, new_endpoints)
         self._merge_controller_data(self.slurmd, new_endpoints)
-
-    def get_controller_status(self, hostname: str) -> str:
-        """Return the status of the given controller instance, e.g. 'primary - UP'."""
-        # Example snippet of ping output:
-        #   "pings": [
-        #     {
-        #       "hostname": "juju-829e74-84",
-        #       "pinged": "DOWN",
-        #       "latency": 123,
-        #       "mode": "primary"
-        #     },
-        #     {
-        #       "hostname": "juju-829e74-85",
-        #       "pinged": "UP",
-        #       "latency": 456,
-        #       "mode": "backup1"
-        #     },
-        #     {
-        #       "hostname": "juju-829e74-86",
-        #       "pinged": "UP",
-        #       "latency": 789,
-        #       "mode": "backup2"
-        #     }
-        #   ],
-        stdout, _ = scontrol("ping", "--json")
-        ping_output = json.loads(stdout)
-        logger.debug("scontrol ping output: %s", ping_output)
-
-        for ping in ping_output["pings"]:
-            if ping["hostname"] == hostname:
-                return f"{ping['mode']} - {ping['pinged']}"
-
-        return ""
 
 
 if __name__ == "__main__":
