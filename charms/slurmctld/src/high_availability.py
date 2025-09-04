@@ -103,7 +103,7 @@ class SlurmctldHA(ops.Object):
         Args:
             source: Path to the directory containing Slurm config files, e.g. `/etc/slurm`
             target: Path to the directory Slurm config files are migrated to,
-                    e.g. `/mnt/slurmctld-statefs`
+                    e.g. `HA_MOUNT_LOCATION`
         """
         # Nothing to do if target already correctly symlinked
         if source.is_symlink() and source.resolve() == target:
@@ -146,7 +146,7 @@ class SlurmctldHA(ops.Object):
             source: Path to the directory containing StateSaveLocation data,
                     e.g. `/var/lib/slurm/checkpoint`
             target: Path to the *parent* directory the source is migrated to,
-                    e.g. `/mnt/slurmctld-statefs` to migrate to `/mnt/slurmctld-statefs/checkpoint`
+                    e.g. `HA_MOUNT_LOCATION` to migrate to `HA_MOUNT_LOCATION/checkpoint`
 
         Notes:
             On the success of this function, the slurmctld service remains stopped to allow for the
