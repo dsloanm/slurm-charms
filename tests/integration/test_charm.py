@@ -84,7 +84,7 @@ def test_deploy(
 
     # Wait for Slurm applications to reach active status.
     juju.wait(
-        lambda status: jubilant.all_active(status, *SLURM_APPS), 
+        lambda status: jubilant.all_active(status, *SLURM_APPS),
         error=lambda status: jubilant.any_error(status, *SLURM_APPS),
     )
 
