@@ -167,7 +167,7 @@ class SlurmctldHA(ops.Object):
         # Perform initial copy of data while slurmctld.service is still running then stop and sync
         # the delta
         rsync = "/usr/bin/rsync"
-        rsync_args = ["--archive", "--delete", source, target]
+        rsync_args = ["--archive", "--delete", str(source), str(target)]
         try:
             call(rsync, *rsync_args)
         except CalledProcessError:
