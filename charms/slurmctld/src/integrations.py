@@ -24,7 +24,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Any
 
 import ops
 from hpc_libs.interfaces.base import Interface
@@ -171,30 +171,12 @@ class SlurmctldPeer(Interface):
 
             self.on.slurmctld_peer_departed.emit(event.relation)
 
-    # A generic function is used for getting peer data. These overloads ensure:
-    #   - ControllerPeerAppData is returned from an application target
-    #   - ControllerPeerUnitData is returned from a unit target
-    @overload
-    def _get_peer_data(
-        self,
-        target: ops.Application,
-        data_type: type[ControllerPeerAppData],
-        decoder=None,
-    ) -> ControllerPeerAppData: ...
-    @overload
-    def _get_peer_data(
-        self,
-        target: ops.Unit,
-        data_type: type[ControllerPeerUnitData],
-        decoder=None,
-    ) -> ControllerPeerUnitData: ...
-
     def _get_peer_data(
         self,
         target: ops.Application | ops.Unit,
         data_type: type[ControllerPeerAppData] | type[ControllerPeerUnitData],
         decoder=None,
-    ) -> ControllerPeerAppData | ControllerPeerUnitData | None:
+    ) -> Any:
         """Get unit or app peer data."""
         integration = self.get_integration()
         if not integration:
