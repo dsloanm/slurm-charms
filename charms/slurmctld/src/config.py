@@ -44,8 +44,9 @@ def init_config(charm: "SlurmctldCharm") -> None:
     successfully and ready to start enlisting `slurmd` nodes.
     """
     # Seed the `slurm.conf` configuration file.
+    data = charm.slurmctld_peer.get_controller_peer_app_data()
     config = SlurmConfig(
-        clustername=charm.slurmctld_peer.cluster_name,
+        clustername=data.cluster_name if data else "",
         slurmctldhost=get_controllers(charm),
         **DEFAULT_SLURM_CONFIG,
     )
@@ -72,7 +73,7 @@ def get_controllers(charm: "SlurmctldCharm") -> list[str]:
         config = charm.slurmctld.config.load()
         if config.slurmctld_host:
             from_file = config.slurmctld_host
-    from_peer = charm.slurmctld_peer.controllers
+    from_peer = charm.slurmctld_peer.get_controllers()
 
     _logger.debug("controllers from slurm.conf: %s, from peer relation: %s", from_file, from_peer)
 
@@ -94,10 +95,11 @@ def update_cgroup_config(charm: "SlurmctldCharm") -> None:
         StopCharm: Raised if the custom `cgroup.conf` configuration provided is invalid.
     """
     if is_container():
+        data = charm.slurmctld_peer.get_controller_peer_app_data()
         _logger.warning(
             "'%s' machine is a container. not enabling cgroup support for '%s'",
             charm.unit.name,
-            charm.slurmctld_peer.cluster_name,
+            data.cluster_name if data else "",
         )
         return
 

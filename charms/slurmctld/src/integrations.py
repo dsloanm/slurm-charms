@@ -44,6 +44,12 @@ class ControllerPeerAppData:
     Attributes:
         cluster_name: The unique name of this cluster.
         restart_signal: A nonce to indicate all controllers should restart `slurmctld.service`.
+
+    Warnings:
+        - The cluster name should only be set once during the entire lifetime of
+          a deployed `slurmctld` application. If the cluster name is overwritten
+          after being set, this will unrecoverably corrupt the controller's
+          `StateSaveLocation` data.
     """
 
     cluster_name: str = ""
@@ -61,7 +67,19 @@ class ControllerPeerUnitData:
     hostname: str = ""
 
 
-def unit_data_decoder(value: str) -> str:
+class SlurmctldPeerConnectedEvent(ops.RelationEvent):
+    """Event emitted when `slurmctld` is connected to the peer integration."""
+
+
+class SlurmctldPeerJoinedEvent(ops.RelationEvent):
+    """Emitted when a new `slurmctld` controller instance joins the peer integration."""
+
+
+class SlurmctldPeerDepartedEvent(ops.RelationEvent):
+    """Emitted when a `slurmctld` controller leaves the peer integration."""
+
+
+def _unit_data_decoder(value: str) -> str:
     """Decode integration unit databag data.
 
     The default encoder for `ops.Relation.load()` is `json.loads()` which incorrectly tries to
@@ -75,18 +93,6 @@ def unit_data_decoder(value: str) -> str:
     if not (value.startswith('"') and value.endswith('"')):
         value = f'"{value}"'
     return json.loads(value)
-
-
-class SlurmctldPeerConnectedEvent(ops.RelationEvent):
-    """Event emitted when `slurmctld` is connected to the peer integration."""
-
-
-class SlurmctldPeerJoinedEvent(ops.RelationEvent):
-    """Emitted when a new `slurmctld` controller instance joins the peer integration."""
-
-
-class SlurmctldPeerDepartedEvent(ops.RelationEvent):
-    """Emitted when a `slurmctld` controller leaves the peer integration."""
 
 
 class _SlurmctldPeerEvents(ops.CharmEvents):
@@ -130,7 +136,7 @@ class SlurmctldPeer(Interface):
         # gather to assemble all SlurmctldHost entries in slurm.conf.
         # Set here rather than the emitted event handler to ensure the hostname is available before
         # the `start` hook runs.
-        self.hostname = self.charm.slurmctld.hostname
+        self.update_controller_peer_unit_data(hostname=self.charm.slurmctld.hostname)
 
         self.on.slurmctld_peer_connected.emit(event.relation)
 
@@ -170,6 +176,95 @@ class SlurmctldPeer(Interface):
                 return
 
             self.on.slurmctld_peer_departed.emit(event.relation)
+
+    def get_controller_peer_app_data(self) -> ControllerPeerAppData | None:
+        """Get controller peer from the `slurmctld-peer` application databag."""
+        return self._get_peer_data(self.app, ControllerPeerAppData)
+
+    def get_controller_peer_unit_data(self, unit: ops.Unit) -> ControllerPeerUnitData | None:
+        """Get controller peer data from a `slurmctld-peer` unit databag.
+
+        Args:
+            unit: Unit to get the data from.
+
+        Returns:
+            The controller peer data for the given unit, or `None` if no data is set.
+        """
+        return self._get_peer_data(unit, ControllerPeerUnitData, _unit_data_decoder)
+
+    def get_controllers(self) -> set[str]:
+        """Return controller hostnames from the peer relation.
+
+        Always includes the hostname of this unit, even when the peer relation is not established.
+        This ensures a valid controller is returned when integrations with other applications, such
+        as slurmd or sackd, occur first.
+        """
+        # Need self.charm.slurmctld.hostname as getting hostname from the unit databag fails if peer
+        # relation is not yet established
+        controllers = {self.charm.slurmctld.hostname}
+
+        integration = self.get_integration()
+        if not integration:
+            _logger.debug(
+                "`%s` integration is not connected. returning local controller only",
+                self._integration_name,
+            )
+            return controllers
+
+        for unit in integration.units:
+            data = self.get_controller_peer_unit_data(unit)
+            if data and data.hostname != "":
+                controllers.add(data.hostname)
+
+        _logger.debug("returning controllers: %s", controllers)
+        return controllers
+
+    @leader
+    def signal_slurmctld_restart(self) -> None:
+        """Add a message to the peer relation to indicate all peers should restart slurmctld.service.
+
+        This is a workaround for `scontrol reconfigure` not instructing all slurmctld daemons to
+        re-read SlurmctldHost lines from slurm.conf.
+        """
+        # The value written to the relation must be unique on each call.
+        signal = str(uuid.uuid4())
+        self.update_controller_peer_app_data(restart_signal=signal)
+
+    @leader
+    def update_controller_peer_app_data(
+        self,
+        *,
+        cluster_name: str | None = None,
+        restart_signal: str | None = None,
+    ) -> None:
+        """Update the controller peer data in the `slurmctld-peer` application databag.
+
+        Args:
+            cluster_name: The unique name of this cluster.
+            restart_signal: A nonce to indicate all controllers should restart `slurmctld.service`.
+
+        Warnings:
+            - Only the `slurmctld` application leader can update controller peer app data.
+        """
+        current = self.get_controller_peer_app_data() or ControllerPeerAppData()
+        data = ControllerPeerAppData(
+            cluster_name=cluster_name if cluster_name is not None else current.cluster_name,
+            restart_signal=(
+                restart_signal if restart_signal is not None else current.restart_signal
+            ),
+        )
+        self._set_peer_data(self.app, data)
+
+    def update_controller_peer_unit_data(self, *, hostname: str | None = None) -> None:
+        """Update the controller peer data in this unit's databag.
+
+        Only updates fields that are not None.
+        """
+        current = self.get_controller_peer_unit_data(self.unit) or ControllerPeerUnitData()
+        data = ControllerPeerUnitData(
+            hostname=hostname if hostname is not None else current.hostname,
+        )
+        self._set_peer_data(self.unit, data)
 
     def _get_peer_data(
         self,
@@ -219,122 +314,3 @@ class SlurmctldPeer(Interface):
         )
         _logger.debug("`%s` data for '%s':\n%s", self._integration_name, target.name, plog(data))
         integration.save(data, target)
-
-    @leader
-    def update_controller_peer_app_data(
-        self,
-        *,
-        cluster_name: str | None = None,
-        restart_signal: str | None = None,
-    ) -> None:
-        """Update the controller peer data in the `slurmctld-peer` application databag.
-
-        Args:
-            cluster_name: The unique name of this cluster.
-            restart_signal: A nonce to indicate all controllers should restart `slurmctld.service`.
-
-        Warnings:
-            - Only the `slurmctld` application leader can update controller peer app data.
-        """
-        current = self.get_controller_peer_app_data() or ControllerPeerAppData()
-        data = ControllerPeerAppData(
-            cluster_name=cluster_name if cluster_name is not None else current.cluster_name,
-            restart_signal=(
-                restart_signal if restart_signal is not None else current.restart_signal
-            ),
-        )
-        self._set_peer_data(self.app, data)
-
-    def get_controller_peer_app_data(self) -> ControllerPeerAppData | None:
-        """Get controller peer from the `slurmctld-peer` application databag."""
-        return self._get_peer_data(self.app, ControllerPeerAppData)
-
-    def update_controller_peer_unit_data(self, *, hostname: str | None = None) -> None:
-        """Update the controller peer data in this unit's databag.
-
-        Only updates fields that are not None.
-        """
-        current = self.get_controller_peer_unit_data(self.unit) or ControllerPeerUnitData()
-        data = ControllerPeerUnitData(
-            hostname=hostname if hostname is not None else current.hostname,
-        )
-        self._set_peer_data(self.unit, data)
-
-    def get_controller_peer_unit_data(self, unit: ops.Unit) -> ControllerPeerUnitData | None:
-        """Get controller peer data from a `slurmctld-peer` unit databag.
-
-        Args:
-            unit: Unit to get the data from.
-
-        Returns:
-            The controller peer data for the given unit, or `None` if no data is set.
-        """
-        return self._get_peer_data(unit, ControllerPeerUnitData, unit_data_decoder)
-
-    @property
-    def cluster_name(self) -> str:
-        """Get the unique cluster name from the application integration data.
-
-        Warnings:
-            - The cluster name should only be set once during the entire lifetime of
-              a deployed `slurmctld` application. If the cluster name is overwritten
-              after being set, this will unrecoverably corrupt the controller's
-              `StateSaveLocation` data.
-        """
-        data = self.get_controller_peer_app_data()
-        return data.cluster_name if data else ""
-
-    @cluster_name.setter
-    @leader
-    def cluster_name(self, value: str) -> None:
-        """Set the unique cluster name in the application integration data."""
-        self.update_controller_peer_app_data(cluster_name=value)
-
-    @property
-    def hostname(self) -> str:
-        """Get this unit's hostname from the unit integration data."""
-        data = self.get_controller_peer_unit_data(self.unit)
-        return data.hostname if data else ""
-
-    @hostname.setter
-    def hostname(self, value: str) -> None:
-        """Set this unit's hostname in the unit integration data."""
-        self.update_controller_peer_unit_data(hostname=value)
-
-    @property
-    def controllers(self) -> set[str]:
-        """Return controller hostnames from the peer relation.
-
-        Always includes the hostname of this unit, even when the peer relation is not established.
-        This ensures a valid controller is returned when integrations with other applications, such
-        as slurmd or sackd, occur first.
-        """
-        # Need self.charm.slurmctld.hostname as self.hostname fails if relation not yet established
-        controllers = {self.charm.slurmctld.hostname}
-
-        integration = self.get_integration()
-        if not integration:
-            _logger.debug(
-                "`%s` integration is not connected. returning local controller only",
-                self._integration_name,
-            )
-            return controllers
-
-        for unit in integration.units:
-            data = self.get_controller_peer_unit_data(unit)
-            if data and data.hostname != "":
-                controllers.add(data.hostname)
-
-        _logger.debug("returning controllers: %s", controllers)
-        return controllers
-
-    @leader
-    def signal_slurmctld_restart(self) -> None:
-        """Add a message to the peer relation to indicate all peers should restart slurmctld.service.
-
-        This is a workaround for `scontrol reconfigure` not instructing all slurmctld daemons to
-        re-read SlurmctldHost lines from slurm.conf.
-        """
-        # The value written to the relation must be unique on each call.
-        signal = str(uuid.uuid4())
-        self.update_controller_peer_app_data(restart_signal=signal)

@@ -149,12 +149,11 @@ class InfluxDB(Object):
                                 client.create_user(self._INFLUX_USER, influx_slurm_password)
 
                             databases = [db["name"] for db in client.get_list_database()]
-                            database_name = self._charm.slurmctld_peer.cluster_name
+                            data = self._charm.slurmctld_peer.get_controller_peer_app_data()
+                            database_name = data.cluster_name if data else ""
 
-                            if self._charm.slurmctld_peer.cluster_name not in databases:
-                                logger.debug(
-                                    f"## Creating influxdb db: {self._charm.slurmctld_peer.cluster_name}"
-                                )
+                            if database_name not in databases:
+                                logger.debug(f"## Creating influxdb db: {database_name}")
                                 client.create_database(database_name)
 
                             client.grant_privilege(
@@ -223,7 +222,8 @@ class InfluxDB(Object):
                         )
 
                         databases = [db["name"] for db in client.get_list_database()]
-                        database_name = self._charm.slurmctld_peer.cluster_name
+                        data = self._charm.slurmctld_peer.get_controller_peer_app_data()
+                        database_name = data.cluster_name if data else ""
 
                         if database_name in databases:
                             client.drop_database(database_name)

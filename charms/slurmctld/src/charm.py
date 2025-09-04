@@ -270,14 +270,16 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_slurmctld_peer_connected(self, _: SlurmctldPeerConnectedEvent) -> None:
         """Handle when `slurmctld` peer integration is created."""
         # Don't overwrite an existing cluster name
-        if self.slurmctld_peer.cluster_name:
+        data = self.slurmctld_peer.get_controller_peer_app_data()
+        if data and data.cluster_name:
             return
 
-        self.slurmctld_peer.cluster_name = (
+        cluster_name = (
             cluster_name
             if (cluster_name := self.config.get("cluster-name", "")) != ""
             else f"{CLUSTER_NAME_PREFIX}-{secrets.token_urlsafe(3)}"
         )
+        self.slurmctld_peer.update_controller_peer_app_data(cluster_name=cluster_name)
 
     @refresh
     @reconfigure

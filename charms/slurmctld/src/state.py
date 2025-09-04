@@ -36,7 +36,8 @@ def slurmctld_installed(charm: "SlurmctldCharm") -> ConditionEvaluation:
 def cluster_name_set(charm: "SlurmctldCharm") -> ConditionEvaluation:
     """Check if the cluster name has been set."""
     try:
-        name_set = charm.slurmctld_peer.cluster_name != ""
+        data = charm.slurmctld_peer.get_controller_peer_app_data()
+        name_set = data is not None and data.cluster_name != ""
     except ops.RelationNotFoundError:
         name_set = False
 
