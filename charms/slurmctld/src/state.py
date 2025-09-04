@@ -87,7 +87,7 @@ def shared_state_mounted(charm: "SlurmctldCharm") -> ConditionEvaluation:
         return failure
 
     # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
-    # e.g. HA_MOUNT_LOCATION/checkpoint => check if HA_MOUNT_LOCATION is a mount
+    # That is, with "HA_MOUNT_LOCATION/checkpoint" we check if "HA_MOUNT_LOCATION" is a mount
     config = charm.slurmctld.config.load()
     state_save_parent = Path(config.state_save_location).parent
     if not state_save_parent.is_mount():

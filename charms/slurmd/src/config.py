@@ -43,7 +43,7 @@ class State(Enum):
 
 
 def reboot_if_required(charm: ops.CharmBase, /, now: bool = False) -> None:
-    """Perform a reboot of the unit if required, e.g. following a driver installation."""
+    """Perform a reboot of the unit if required, such as following a driver installation."""
     if Path("/var/run/reboot-required").exists():
         _logger.info("rebooting unit '%s'", charm.unit.name)
         charm.unit.reboot(now)

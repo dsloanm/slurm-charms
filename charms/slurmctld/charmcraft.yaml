@@ -101,9 +101,9 @@ config:
       description: |
         Extra parameters for NHC command.
 
-        This option can be used to customize how NHC is called, e.g. to send an
-        e-mail to an admin when NHC detects an error set this value to.
-        `-M admin@domain.com`.
+        This option can be used to customize how NHC is called. For example,
+        to send an e-mail to an admin when NHC detects an error, set this
+        value to `-M admin@domain.com`.
 
     health-check-interval:
       default: 600
@@ -136,7 +136,7 @@ actions:
     params:
       nodename:
         type: string
-        description: The nodes to drain, using the Slurm format, e.g. `"node-[1,2]"`.
+        description: The nodes to drain, using the Slurm format. For example, `"node-[1,2]"`.
       reason:
         type: string
         description: Reason to drain the nodes.
@@ -155,6 +155,6 @@ actions:
       nodename:
         type: string
         description: |
-          The nodes to resume, using the Slurm format, e.g. `"node-[1,2]"`.
+          The nodes to resume, using the Slurm format. For example, `"node-[1,2]"`.
     required:
       - nodename

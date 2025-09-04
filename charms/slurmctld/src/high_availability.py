@@ -101,9 +101,9 @@ class SlurmctldHA(ops.Object):
         current date and time before migration. For example, `/etc/slurm_20250620_161437`.
 
         Args:
-            source: Path to the directory containing Slurm config files, e.g. `/etc/slurm`
+            source: Path to the directory containing Slurm config files, such as `/etc/slurm`
             target: Path to the directory Slurm config files are migrated to,
-                    e.g. `HA_MOUNT_LOCATION`
+                    such as `HA_MOUNT_LOCATION`
         """
         # Nothing to do if target already correctly symlinked
         if source.is_symlink() and source.resolve() == target:
@@ -144,9 +144,9 @@ class SlurmctldHA(ops.Object):
 
         Args:
             source: Path to the directory containing StateSaveLocation data,
-                    e.g. `/var/lib/slurm/checkpoint`
+                    such as `/var/lib/slurm/checkpoint`
             target: Path to the *parent* directory the source is migrated to,
-                    e.g. `HA_MOUNT_LOCATION` to migrate to `HA_MOUNT_LOCATION/checkpoint`
+                    such as `HA_MOUNT_LOCATION` to migrate to `HA_MOUNT_LOCATION/checkpoint`
 
         Notes:
             On the success of this function, the slurmctld service remains stopped to allow for the

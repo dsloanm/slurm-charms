@@ -165,7 +165,7 @@ class SlurmdbdCharm(ops.CharmBase):
         """Process the `DatabaseCreatedEvent` and update the database parameters.
 
         Raises:
-            ValueError: When the database endpoints are invalid (e.g. empty).
+            ValueError: When the database endpoints are invalid (for example, empty).
 
         Notes:
             - Updates the database parameters for the slurmdbd configuration based up on the

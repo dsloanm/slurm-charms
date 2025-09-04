@@ -76,7 +76,7 @@ def _override_ompi_conf() -> None:
         parts = line.split()
         values = parts[2].strip().lstrip("^").split(",")
         values = [v for v in values if v not in ("uct", "ucx")]
-        # Remove line entirely if all values removed, e.g. "pml = ^ucx"
+        # Remove line entirely if all values removed, such as line "pml = ^ucx"
         content[i] = f"{parts[0]} = ^{','.join(values)}" if values else ""
 
     file.write_text("\n".join(filter(None, content)) + "\n")

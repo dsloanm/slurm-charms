@@ -49,7 +49,7 @@ class GPUDriverDetector:
     def _get_linux_modules_metapackage(self, driver) -> str:
         """Retrieve the modules metapackage for the combination of current kernel and given driver.
 
-        e.g. linux-modules-nvidia-535-server-aws for driver nvidia-driver-535-server
+        For example, linux-modules-nvidia-535-server-aws for driver nvidia-driver-535-server
         """
         return UbuntuDrivers.detect.get_linux_modules_metapackage(apt_pkg.Cache(None), driver)
 
@@ -63,11 +63,11 @@ class GPUDriverDetector:
             # Ignore drivers that are not recommended
             if packages[driver_package].get("recommended"):
                 # Retrieve metapackage for this driver,
-                # e.g. nvidia-headless-no-dkms-535-server for nvidia-driver-535-server
+                # For example, nvidia-headless-no-dkms-535-server for nvidia-driver-535-server
                 driver_metapackage = packages[driver_package]["metapackage"]
 
                 # Retrieve modules metapackage for combination of current kernel and recommended driver,
-                # e.g. linux-modules-nvidia-535-server-aws
+                # For example, linux-modules-nvidia-535-server-aws
                 modules_metapackage = self._get_linux_modules_metapackage(driver_package)
 
                 # Add to list of packages to install
@@ -128,7 +128,7 @@ def get_all_gpu() -> dict[str, list[int]]:
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
 
         # Make model name lowercase and replace whitespace with underscores to turn into GRES-compatible format,
-        # e.g. "Tesla T4" -> "tesla_t4", which can be added as "Gres=gpu:tesla_t4:1"
+        # For example, "Tesla T4" -> "tesla_t4", which can be added as "Gres=gpu:tesla_t4:1"
         # Aims to follow convention set by Slurm autodetect:
         # https://slurm.schedmd.com/gres.html#AutoDetect
         model = pynvml.nvmlDeviceGetName(handle)
