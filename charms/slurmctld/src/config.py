@@ -183,27 +183,22 @@ def update_overrides(charm: "SlurmctldCharm") -> None:
 def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
     """Reconfigure the `slurmctld` service.
 
+    In a `slurmctld` high availability setup, all `slurmctld` services across all `slurmctld` units
+    in the cluster are restarted by this function. This ensures all `slurm.conf` changes are picked
+    up, including those not re-read by an `scontrol reconfigure` command. If a restart is not done,
+    removal of a controller will result in a malfunctioning cluster as `SlurmctldHost` lines are not
+    re-read and an availability event may cause a failover attempt to a nonexistent backup.
+
     Raises:
         SlurmOpsError: Raised if the `scontrol reconfigure` command fails.
     """
     if not slurmctld_ready(charm):
         return
 
-    # In an HA setup, all slurmctld services across all hosts must be restarted to ensure
-    # SlurmctldHost lines are reloaded from slurm.conf.
-    # `scontrol reconfigure` alone does not reload SlurmctldHost.
-    # If a restart is not done, removal of a controller will result in a malfunctioning cluster.
+    # This must occur before `scontrol reconfigure` in case the primary `slurmctld` has been
+    # removed and this unit is a backup being promoted to the new primary.
     #
-    # Example: 3 controllers A (primary), B (backup1), C (backup2).
-    #   - The SlurmctldHost entry for B is removed from slurm.conf.
-    #   - `scontrol reconfigure` is run on A.
-    #   - A experiences availability issues.
-    #   - B attempts to take over, despite not being in SlurmctldHost, and fails.
-    #   - Slurm client commands now fail.
-    #
-    # This restart must occur before `scontrol reconfigure` in case the primary `slurmctld` has been
-    # removed and this unit is a backup being promoted to the new primary. The service restart will
-    # ensure `slurmctld.service` is not in standby mode, avoiding the following error:
+    # If the `scontrol reconfigure` is performed first in this situation, it fails with:
     #   '['scontrol', 'reconfigure']' failed with exit code 1. reason: slurm_reconfigure error:
     #   Slurm backup controller in standby mode
     try:
