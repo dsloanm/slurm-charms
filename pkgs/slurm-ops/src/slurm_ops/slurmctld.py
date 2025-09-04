@@ -100,13 +100,7 @@ class SlurmctldManager(SlurmManager):
         #       "hostname": "juju-829e74-85",
         #       "pinged": "UP",
         #       "latency": 456,
-        #       "mode": "backup1"
-        #     },
-        #     {
-        #       "hostname": "juju-829e74-86",
-        #       "pinged": "UP",
-        #       "latency": 789,
-        #       "mode": "backup2"
+        #       "mode": "backup"
         #     }
         #   ],
         stdout, _ = scontrol("ping", "--json")
