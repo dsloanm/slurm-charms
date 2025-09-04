@@ -83,7 +83,10 @@ def test_deploy(
     juju.integrate(MYSQL_APP_NAME, SLURMDBD_APP_NAME)
 
     # Wait for Slurm applications to reach active status.
-    juju.wait(lambda status: jubilant.all_active(status, *SLURM_APPS))
+    juju.wait(
+        lambda status: jubilant.all_active(status, *SLURM_APPS), 
+        error=lambda status: jubilant.any_error(status, *SLURM_APPS),
+    )
 
 
 @pytest.mark.order(2)
