@@ -68,11 +68,7 @@ def get_controllers(charm: "SlurmctldCharm") -> list[str]:
     # controllers currently in the peer relation.
     # File ordering must be preserved as it dictates which slurmctld instance is the primary and
     # which are backups.
-    from_file = []
-    if charm.slurmctld.config.path.exists():
-        config = charm.slurmctld.config.load()
-        if config.slurmctld_host:
-            from_file = config.slurmctld_host
+    from_file = charm.slurmctld.get_controllers()
     from_peer = charm.slurmctld_peer.get_controllers()
 
     _logger.debug(

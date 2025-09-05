@@ -86,8 +86,17 @@ class SlurmctldManager(SlurmManager):
 
         return ""
 
+    def get_controllers(self) -> list[str]:
+        """Get hostnames for all controllers defined in the slurm.conf file."""
+        controllers = []
+        if self.config.path.exists():
+            config = self.config.load()
+            if config.slurmctld_host:
+                controllers = config.slurmctld_host
+        return controllers
+
     def get_controller_status(self) -> str:
-        """Return the status of the current controller instance."""
+        """Get the status of the current controller instance."""
         # Example snippet of ping output:
         #   "pings": [
         #     {
