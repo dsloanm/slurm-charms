@@ -65,6 +65,13 @@ free to experiment!
 just repo integration
 ```
 
+The integration tests for `slurmctld` high availability functionality require more time and computer
+resources to run so are optionally gated behind a flag:
+
+```shell
+just repo integration -- --run-high-availability
+```
+
 If you're interested in contributing, take a look at our [contributing guidelines](./CONTRIBUTING.md).
 
 ## 🤝 Project and Community
