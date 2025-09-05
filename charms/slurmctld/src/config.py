@@ -75,7 +75,9 @@ def get_controllers(charm: "SlurmctldCharm") -> list[str]:
             from_file = config.slurmctld_host
     from_peer = charm.slurmctld_peer.get_controllers()
 
-    _logger.debug("controllers from slurm.conf: %s, from peer integration: %s", from_file, from_peer)
+    _logger.debug(
+        "controllers from slurm.conf: %s, from peer integration: %s", from_file, from_peer
+    )
 
     # Controllers in the file but not the peer relation have departed.
     # Controllers in the peer relation but not the file are newly added.
