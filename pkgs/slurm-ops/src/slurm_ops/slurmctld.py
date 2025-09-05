@@ -93,6 +93,7 @@ class SlurmctldManager(SlurmManager):
             config = self.config.load()
             if config.slurmctld_host:
                 controllers = config.slurmctld_host
+
         return controllers
 
     def get_controller_status(self) -> str:
