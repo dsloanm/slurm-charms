@@ -73,9 +73,16 @@ just repo typecheck
 # Run unit tests
 just repo unit
 
-# Run integration tests
+# Run minimally required integration test suite (matches CI)
 just repo integration
+
+# [Recommended] Run full integration tests suite
+just repo integration -- --run-high-availability
 ```
+
+Note: CI will check only `just repo integration`. However, we strongly recommend running
+`just repo integration -- --run-high-availability` locally before submitting, as the full suite
+includes additional coverage to catch more complex cases relating to charm scaling.
 
 ## Maintenance information
 
