@@ -364,6 +364,22 @@ def stage_charm(
         except OSError:
             raise RepositoryError(f"Failed to write file `{charm.build_path / CHARMCRAFT_FILE}`")
 
+        # Create a version file and pack it into the charm. This is dynamically generated to ensure
+        # that the git revision of the charm is always recorded in this version file.
+        git_hash = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(charm.path),
+                "describe",
+                "--always",
+                "--dirty",
+            ],
+            stderr=subprocess.STDOUT
+        ).strip().decode("utf-8")
+        version_file = Path(charm.build_path / "version")
+        version_file.write_text(git_hash)
+
     for lib in charm.libraries:
         src = LIBS_CHARM_PATH / "lib" / "charms" / lib.path
         dest = charm.build_path / "lib" / "charms" / lib.path
