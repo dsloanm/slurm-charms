@@ -64,6 +64,7 @@ class SlurmctldHA(ops.Object):
             return
 
         # Both leader and non-leaders migrate /etc/ config files
+        # Leader copies its config files and non-leaders symlink to that copy
         etc_source = Path("/etc/slurm")
         target = Path(HA_MOUNT_LOCATION)
 
@@ -94,8 +95,10 @@ class SlurmctldHA(ops.Object):
             return
 
         # Migration has been successful, update configs to the new path and restart service
+        new_state_save_location = target / state_save_source.name
         with self._charm.slurmctld.config.edit() as config:
-            config.state_save_location = str(target / state_save_source.name)
+            config.state_save_location = str(new_state_save_location)
+        logger.debug("state save location updated to %s", new_state_save_location)
         self._charm.on.start.emit()
 
     def _migrate_etc_data(self, source: Path, target: Path) -> None:
@@ -123,18 +126,21 @@ class SlurmctldHA(ops.Object):
 
         if source.exists():
             if self._charm.unit.is_leader():
-                logger.debug("leader copying %s to %s", source, target)
+                if not target.exists():
+                    logger.debug("leader copying %s to %s", source, target)
 
-                def copy_preserve_ids(source, target):
-                    """Preserve owner and group IDs of copied files."""
-                    output = shutil.copy2(source, target)
-                    stat = Path(source).stat()
-                    shutil.chown(target, user=stat.st_uid, group=stat.st_gid)
-                    return output
+                    def copy_preserve_ids(source, target):
+                        """Preserve owner and group IDs of copied files."""
+                        output = shutil.copy2(source, target)
+                        stat = Path(source).stat()
+                        shutil.chown(target, user=stat.st_uid, group=stat.st_gid)
+                        return output
 
-                shutil.copytree(
-                    source, target, copy_function=copy_preserve_ids, dirs_exist_ok=True
-                )
+                    shutil.copytree(
+                        source, target, copy_function=copy_preserve_ids, dirs_exist_ok=True
+                    )
+                else:
+                    logger.warning("%s already exists. aborting copy from %s", target, source)
 
             # Timestamp to avoid overwriting any existing backup
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -165,10 +171,8 @@ class SlurmctldHA(ops.Object):
             *must* restart the slurmctld.service.
         """
         checkpoint_target = target / source.name
-        if checkpoint_target.exists() and source == checkpoint_target:
-            logger.warning(
-                "state save location is already %s. aborting migration", checkpoint_target
-            )
+        if checkpoint_target.exists():
+            logger.warning("%s already exists. aborting copy from %s", checkpoint_target, source)
             return
 
         status_message = f"Migrating {source} to {target}"
