@@ -18,7 +18,6 @@
 
 import logging
 import secrets
-from pathlib import Path
 from typing import cast
 
 import ops
@@ -201,21 +200,11 @@ class SlurmctldCharm(ops.CharmBase):
 
     @refresh
     @reconfigure
+    @wait_unless(shared_state_mounted)
     def _on_leader_elected(self, event: ops.LeaderElectedEvent) -> None:
         """Refresh controller lists on leader re-election."""
-        if not self.slurmctld.config.exists():
-            logger.debug("slurm.conf not ready. skipping event")
-            return
-
-        # Refresh only if in an HA setup with a shared SaveStateLocation
-        # Check the *parent* as StateSaveLocation is a subdirectory under the shared filesystem in HA
-        config = self.slurmctld.config.load()
-        state_save_parent = Path(config.state_save_location).parent
-        if not state_save_parent.is_mount():
-            logger.debug(
-                "%s is not a mounted file system. HA is not enabled. skipping event",
-                state_save_parent,
-            )
+        if not self.model.relations.get(HA_MOUNT_INTEGRATION_NAME):
+            logger.debug("HA is not enabled. skipping event")
             return
 
         self._refresh_controllers()
