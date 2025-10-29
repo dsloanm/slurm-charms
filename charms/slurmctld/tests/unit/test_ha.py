@@ -15,7 +15,6 @@
 
 """Unit tests for the `slurmctld` charmed operator."""
 
-import shutil
 import textwrap
 from pathlib import Path
 from unittest.mock import call
@@ -47,18 +46,6 @@ class TestSlurmctldHA:
         self, mocker: MockerFixture, mock_charm, fs: FakeFilesystem, leader
     ) -> None:
         """Test high availability data migration logic to an empty shared filesystem."""
-        # Patch `shutil.copytree` to ignore `copy_function` argument.
-        # Necessary as the custom `copy_function` in the HA migration code itself uses `shutil`
-        # methods, which results in deadlock when pyfakefs mocks `shutil`.
-        # I.e. a mocked `shutil.copytree` tries to call a mocked `shutil.copy2` and deadlocks.
-        real_copytree = shutil.copytree
-
-        def patched_copytree(src, dst, *args, **kwargs):
-            kwargs.pop("copy_function", None)
-            return real_copytree(src, dst, *args, **kwargs)
-
-        mocker.patch("shutil.copytree", new=patched_copytree)
-
         # The HA migration process uses `rsync` via `subprocess.run`. This is not compatible with
         # pyfakefs as the spawned process is unaware of the fake filesystem.
         # Patch `subprocess.run` to avoid execution of `rsync` and verify invocation instead.
