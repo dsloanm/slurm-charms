@@ -85,6 +85,8 @@ fy6i2AnB3kUI27D4HY2YSlXLSRbjiSxTfVwNCzDsIh7Czefsm6ITK2+cVWs0hNQ=
 =cs1s
 -----END PGP PUBLIC KEY BLOCK-----
 """
+UBUNTU_HPC_EXPERIMENTAL_PPA_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/experimental/ubuntu"
+UBUNTU_HPC_SLURM_PPA_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/slurm-wlm-25.11/ubuntu"
 
 
 class OpsManager(Protocol):  # pragma: no cover
@@ -162,7 +164,8 @@ class _AptManager(OpsManager):
 
     def install(self) -> None:
         """Install Slurm using the `slurm-wlm` Debian package set."""
-        self._init_ubuntu_hpc_ppa()
+        self._init_ppa(UBUNTU_HPC_EXPERIMENTAL_PPA_URI)
+        self._init_ppa(UBUNTU_HPC_SLURM_PPA_URI)
         self._install_service()
         self._create_state_save_location()
         self._apply_overrides()
@@ -185,28 +188,31 @@ class _AptManager(OpsManager):
         return Path("/var/lib/slurm")
 
     @staticmethod
-    def _init_ubuntu_hpc_ppa() -> None:
-        """Initialize `apt` to use Ubuntu HPC Debian package repositories.
+    def _init_ppa(uri: str) -> None:
+        """Initialize `apt` to use the given package repository.
+
+        Args:
+            uri: The URI of the package repository to use.
 
         Raises:
-            SlurmOpsError: Raised if `apt` fails to update with Ubuntu HPC repositories enabled.
+            SlurmOpsError: Raised if `apt` fails to update with repositories enabled.
         """
-        _logger.debug("initializing apt to use ubuntu hpc debian package repositories")
+        _logger.debug("initializing apt to use package repository: %s", uri)
         try:
-            experimental = apt.DebianRepository(
+            ppa = apt.DebianRepository(
                 enabled=True,
                 repotype="deb",
-                uri="https://ppa.launchpadcontent.net/ubuntu-hpc/experimental/ubuntu",
+                uri=uri,
                 release=distro.codename(),
                 groups=["main"],
             )
-            experimental.import_key(UBUNTU_HPC_PPA_KEY)
+            ppa.import_key(UBUNTU_HPC_PPA_KEY)
             repositories = apt.RepositoryMapping()
-            repositories.add(experimental)
+            repositories.add(ppa)
             apt.update()
         except (apt.GPGKeyError, CalledProcessError) as e:
             raise SlurmOpsError(
-                f"failed to initialize apt to use ubuntu hpc repositories. reason: {e}"
+                f"failed to initialize apt to use {uri} package repository: {e}"
             )
 
     @staticmethod
