@@ -201,3 +201,14 @@ def test_job_submission_works(juju: jubilant.Juju) -> None:
     # Get the hostname of the compute node from a Slurm job.
     sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} hostname -s", unit=sackd_unit)
     assert sackd_result.stdout == slurmd_result.stdout
+
+@pytest.mark.order(10)
+def test_gpu_job_submission_works(juju: jubilant.Juju) -> None:
+    """Test that a job requsting a GPU can be successfully submitted to the Slurm cluster."""
+    sackd_unit = f"{SACKD_APP_NAME}/0"
+    slurmd_unit = f"{SLURMD_APP_NAME}/0"
+
+    logger.info("testing that a GPU job can be submitted to slurm and successfully run")
+    slurmd_result = juju.exec("hostname -s", unit=slurmd_unit)
+    sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} --gres gpu:1 hostname -s", unit=sackd_unit)
+    assert sackd_result.stdout == slurmd_result.stdout
