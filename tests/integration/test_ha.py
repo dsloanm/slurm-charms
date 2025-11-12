@@ -291,7 +291,7 @@ def test_slurmctld_service_failover(juju: jubilant.Juju) -> None:
         service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
         )
-        assert "slurmctld: Running as primary controller" in service_result.stdout
+        assert "Running as primary controller" in service_result.stdout
 
     retry_asserts()
 
@@ -329,12 +329,12 @@ def test_slurmctld_service_recover(juju: jubilant.Juju) -> None:
         primary_service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
         )
-        assert "slurmctld: Running as primary controller" in primary_service_result.stdout
+        assert "Running as primary controller" in primary_service_result.stdout
 
         backup_service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
         )
-        assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+        assert "slurmctld running in background mode" in backup_service_result.stdout
 
     retry_asserts()
 
@@ -377,7 +377,7 @@ def test_slurmctld_unit_failover(juju: jubilant.Juju) -> None:
         service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
         )
-        assert "slurmctld: Running as primary controller" in service_result.stdout
+        assert "Running as primary controller" in service_result.stdout
 
         logger.info("testing job submission")
         slurmd_result = juju.exec("hostname -s", unit=compute_unit)
@@ -424,12 +424,12 @@ def test_slurmctld_unit_recover(juju: jubilant.Juju) -> None:
         primary_service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["primary"]["unit"]
         )
-        assert "slurmctld: Running as primary controller" in primary_service_result.stdout
+        assert "Running as primary controller" in primary_service_result.stdout
 
         backup_service_result = juju.exec(
             f"systemctl status {slurmctld_service}", unit=controllers["backup"]["unit"]
         )
-        assert "slurmctld: slurmctld running in background mode" in backup_service_result.stdout
+        assert "slurmctld running in background mode" in backup_service_result.stdout
 
     retry_asserts()
 
