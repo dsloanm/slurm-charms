@@ -16,6 +16,7 @@
 """Slurm charm integration tests."""
 
 import logging
+import textwrap
 
 import jubilant
 import pytest
@@ -200,4 +201,41 @@ def test_job_submission_works(juju: jubilant.Juju) -> None:
     slurmd_result = juju.exec("hostname -s", unit=slurmd_unit)
     # Get the hostname of the compute node from a Slurm job.
     sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} hostname -s", unit=sackd_unit)
+    assert sackd_result.stdout == slurmd_result.stdout
+
+
+@pytest.mark.order(10)
+def test_gpu_job_submission_works(juju: jubilant.Juju) -> None:
+    """Test that a job requsting a GPU can be successfully submitted to the Slurm cluster."""
+    sackd_unit = f"{SACKD_APP_NAME}/0"
+    slurmd_unit = f"{SLURMD_APP_NAME}/0"
+
+    logger.info("configuring slurmd unit with mock GPU resource")
+    # Mock parameters based on NVIDIA plugin code:
+    # https://github.com/SchedMD/slurm/blob/d2db17f/src/plugins/gpu/nvidia/gpu_nvidia.c#L43
+    gpu_proc_prefix = "/proc/driver/nvidia/gpus/0000:01:00.0"
+    gpu_sys_prefix = "/sys/bus/pci/drivers/nvidia/0000:01:00.0"
+    gpu_info = textwrap.dedent("""\
+        Model: 		 Mock GPU
+        IRQ:   		 185
+        GPU UUID: 	 GPU-12345678-90ab-cdef-1234-567890abcdef
+        Video BIOS: 	 12.34.56.78.aa
+        Bus Type: 	 PCIe
+        DMA Size: 	 47 bits
+        DMA Mask: 	 0x7fffffffffff
+        Bus Location: 	 0000:01:00.0
+        Device Minor: 	 0
+        GPU Firmware: 	 123.456.78
+        GPU Excluded:	 No
+    """)
+    # TODO: this doesn't work - get "permission denied" trying to make the directories
+    juju.exec(f"sudo mkdir -p '{gpu_proc_prefix}' '{gpu_sys_prefix}'", unit=slurmd_unit)
+    juju.exec(f"echo '{gpu_info}' > {gpu_proc_prefix}/information", unit=slurmd_unit)
+    juju.exec(f"echo 0 > {gpu_sys_prefix}/local_cpulist", unit=slurmd_unit)
+
+    # TODO: add mock_gpu Gres info to /etc/default/slurm, then reregister node with slurmctld
+
+    logger.info("testing that a GPU job can be submitted to slurm and successfully run")
+    slurmd_result = juju.exec("hostname -s", unit=slurmd_unit)
+    sackd_result = juju.exec(f"srun --partition {SLURMD_APP_NAME} --gres gpu:mock_gpu:1 hostname -s", unit=sackd_unit)
     assert sackd_result.stdout == slurmd_result.stdout
