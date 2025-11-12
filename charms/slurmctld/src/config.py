@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, cast
 import ops
 from constants import (
     DEFAULT_CGROUP_CONFIG,
+    DEFAULT_GRES_CONFIG,
     DEFAULT_SLURM_CONFIG,
     OVERRIDES_CONFIG_FILE,
 )
@@ -27,7 +28,7 @@ from hpc_libs.interfaces import ControllerData
 from hpc_libs.is_container import is_container
 from hpc_libs.utils import StopCharm, plog
 from slurm_ops import SlurmOpsError, scontrol
-from slurmutils import CGroupConfig, ModelError, SlurmConfig
+from slurmutils import CGroupConfig, GresConfig, ModelError, SlurmConfig
 from state import slurmctld_ready
 
 if TYPE_CHECKING:
@@ -60,6 +61,10 @@ def init_config(charm: "SlurmctldCharm") -> None:
     for config in DEFAULT_SLURM_CONFIG["include"]:
         with charm.slurmctld.config.includes[config].edit() as _:
             pass
+
+    # Create default gres.conf
+    gres_config = GresConfig(**DEFAULT_GRES_CONFIG)
+    charm.slurmctld.gres.dump(gres_config)
 
 
 def get_controllers(charm: "SlurmctldCharm") -> list[str]:
