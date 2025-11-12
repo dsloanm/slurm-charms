@@ -82,3 +82,4 @@ DEFAULT_PROFILING_CONFIG = {
     "jobacctgatherfrequency": {"task": 5, "network": 5},
     "jobacctgathertype": ("jobacct_gather/linux" if is_container() else "jobacct_gather/cgroup"),
 }
+DEFAULT_GRES_CONFIG = { "autodetect": "nvidia" }
