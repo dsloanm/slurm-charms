@@ -245,7 +245,7 @@ def test_gpu_job_submission_works(juju: jubilant.Juju) -> None:
         f"echo '{gpu_information}' > /tmp/proc/driver/nvidia/gpus/0000:01:00.0/information",
         unit=slurmd_unit,
     )
-    # Can't Overlay mount with /proc. Attempts fail with error:
+    # Can't overlay mount with /proc. Attempts fail with error:
     #   "wrong fs type, bad option, bad superblock on overlay, missing codepage or helper program, or other error"
     # Bind mount over the top instead. This should only block `/proc/driver/rtc` briefly
     juju.exec("sudo mount --bind /tmp/proc/driver /proc/driver", unit=slurmd_unit)
