@@ -227,18 +227,18 @@ def test_gpu_job_submission_works(juju: jubilant.Juju) -> None:
     # Mock GPU info in /proc
     gpu_information = textwrap.dedent(
         """\
-    Model: 		 Mock GPU
-    IRQ:   		 185
-    GPU UUID: 	 GPU-12345678-90ab-cdef-1234-567890abcdef
-    Video BIOS: 	 12.34.56.78.aa
-    Bus Type: 	 PCIe
-    DMA Size: 	 47 bits
-    DMA Mask: 	 0x7fffffffffff
-    Bus Location: 	 0000:01:00.0
-    Device Minor: 	 0
-    GPU Firmware: 	 123.456.78
-    GPU Excluded:	 No
-    """
+            Model: 		 Mock GPU
+            IRQ:   		 185
+            GPU UUID: 	 GPU-12345678-90ab-cdef-1234-567890abcdef
+            Video BIOS: 	 12.34.56.78.aa
+            Bus Type: 	 PCIe
+            DMA Size: 	 47 bits
+            DMA Mask: 	 0x7fffffffffff
+            Bus Location: 	 0000:01:00.0
+            Device Minor: 	 0
+            GPU Firmware: 	 123.456.78
+            GPU Excluded:	 No
+        """
     )
     juju.exec("mkdir -p /tmp/proc/driver/nvidia/gpus/0000:01:00.0/", unit=slurmd_unit)
     juju.exec(
