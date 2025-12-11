@@ -206,13 +206,18 @@ def test_job_submission(juju: jubilant.Juju) -> None:
 
 @pytest.mark.order(10)
 def test_gpu_job_submission(juju: jubilant.Juju) -> None:
-    """Test that a job requesting a GPU can be successfully submitted to the Slurm cluster."""
+    """Test that a job requesting a GPU can be successfully submitted to the Slurm cluster.
+
+    Warnings:
+       - This test has been validated with Slurm 25.11 and its NVIDIA GPU autodetection plugin.
+         Functionality is not guaranteed with other versions of Slurm.
+    """
     sackd_unit = f"{SACKD_APP_NAME}/0"
     slurmd_unit = f"{SLURMD_APP_NAME}/0"
 
     # Set up a mock GPU device on the slurmd unit by mounting over relevant files in /sys and /proc
-    # WARNING: This is tightly coupled to the method the Slurm "Autodetect=nvidia" plugin uses to
-    # detect GPUs. Changes to that method may break this test.
+    # This is tightly coupled to the method the Slurm "Autodetect=nvidia" plugin uses to detect GPUs
+    # Changes to that method in future Slurm revisions may break this test
     # Mock NUMA region info in /sys
     juju.exec("mkdir -p /tmp/sys/bus/pci/drivers/nvidia/0000:01:00.0/", unit=slurmd_unit)
     juju.exec(
