@@ -191,7 +191,7 @@ def test_health_check_program(juju: jubilant.Juju) -> None:
 
 
 @pytest.mark.order(9)
-def test_job_submission_works(juju: jubilant.Juju) -> None:
+def test_job_submission(juju: jubilant.Juju) -> None:
     """Test that a job can be successfully submitted to the Slurm cluster."""
     sackd_unit = f"{SACKD_APP_NAME}/0"
     slurmd_unit = f"{SLURMD_APP_NAME}/0"
@@ -205,7 +205,7 @@ def test_job_submission_works(juju: jubilant.Juju) -> None:
 
 
 @pytest.mark.order(10)
-def test_gpu_job_submission_works(juju: jubilant.Juju) -> None:
+def test_gpu_job_submission(juju: jubilant.Juju) -> None:
     """Test that a job requesting a GPU can be successfully submitted to the Slurm cluster."""
     sackd_unit = f"{SACKD_APP_NAME}/0"
     slurmd_unit = f"{SLURMD_APP_NAME}/0"
