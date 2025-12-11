@@ -250,8 +250,9 @@ def test_gpu_job_submission(juju: jubilant.Juju) -> None:
     # Bind mount over the top instead. This should only block `/proc/driver/rtc` briefly
     juju.exec("sudo mount --bind /tmp/proc/driver /proc/driver", unit=slurmd_unit)
 
-    # Slurm needs a GPU device file - use /dev/zero as a mock
-    juju.exec("sudo touch /dev/nvidia0", unit=slurmd_unit)  # mount point must exist
+    # Slurm expects a GPU device file under /dev when auto-detecting GPUs.
+    # Use /dev/zero as a mock by bind mounting over an empty /dev/nvidia0 device file.
+    juju.exec("sudo touch /dev/nvidia0", unit=slurmd_unit)
     juju.exec("sudo mount --bind /dev/zero /dev/nvidia0", unit=slurmd_unit)
 
     # Manually add Gres line to dynamic node config. Necessary as the mock GPU was not present at
@@ -271,17 +272,17 @@ def test_gpu_job_submission(juju: jubilant.Juju) -> None:
     logger.info("testing that a GPU job can be submitted to slurm and successfully run")
 
     # Retry on failure as it may take a moment for the node to re-register
-    @tenacity.retry(
-        wait=tenacity.wait.wait_exponential(multiplier=2, min=1, max=30),
+    attempts = tenacity.Retrying(
+        wait=tenacity.wait.wait_exponential(multiplier=2, min=1),
         stop=tenacity.stop_after_attempt(3),
         reraise=True,
     )
-    def retry_submit():
-        sackd_result = juju.exec(
-            f"srun --partition {SLURMD_APP_NAME} --gres gpu:1 hostname -s", unit=sackd_unit
-        )
-        assert sackd_result.stdout == slurmd_result.stdout
-    retry_submit()
+    for attempt in attempts:
+        with attempt:
+            sackd_result = juju.exec(
+                f"srun --partition {SLURMD_APP_NAME} --gres gpu:1 hostname -s", unit=sackd_unit
+            )
+            assert sackd_result.stdout == slurmd_result.stdout
 
     logger.info("cleaning up mock GPU setup")
     juju.exec("sudo umount /sys/bus/pci/drivers", unit=slurmd_unit)
