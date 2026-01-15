@@ -42,6 +42,7 @@ def setup_influxdb(juju: jubilant.Juju) -> None:
     sleep(5)
 
 
+@pytest.mark.skip(reason="influxdb charm deployment is currently broken")
 @pytest.mark.order(12)
 def test_task_accounting_works(juju: jubilant.Juju) -> None:
     """Test that `influxdb` is recording task level info."""
