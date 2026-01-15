@@ -66,7 +66,7 @@ def test_apptainer_oci_scheduling(juju: jubilant.Juju) -> None:
     logger.info("testing that '%s' is running jobs within OCI images", APPTAINER_APP_NAME)
     juju.exec("apptainer pull /tmp/jammy.sif docker://ubuntu:jammy", unit=slurmd_unit)
     result = juju.exec(
-        f"srun -p {SLURMD_APP_NAME} --container=/tmp/jammy.sif cat /etc/os-release",
+        f"cd /tmp; srun -p {SLURMD_APP_NAME} --container=/tmp/jammy.sif cat /etc/os-release",
         unit=sackd_unit,
     ).stdout.strip()
     env = dotenv_values(stream=StringIO(result))
