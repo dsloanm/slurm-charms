@@ -70,7 +70,7 @@ from hpc_libs.interfaces import (
 from hpc_libs.utils import StopCharm, leader, plog, reconfigure, refresh
 from integrations import SlurmctldPeer, SlurmctldPeerConnectedEvent
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
-from netifaces import interfaces
+from psutil import net_if_addrs
 from slurm_ops import SlurmctldManager, SlurmOpsError, scontrol
 from slurmutils import (
     AcctGatherConfig,
@@ -427,7 +427,7 @@ class SlurmctldCharm(ops.CharmBase):
                 profileinfluxdbpass=event.influxdb_pass,
                 profileinfluxdbdatabase=event.influxdb_database,
                 profileinfluxdbrtpolicy=event.influxdb_policy,
-                sysfsinterfaces=interfaces(),
+                sysfsinterfaces=list(net_if_addrs().keys()),
             )
 
             logger.info("updating `acct_gather.conf`")
