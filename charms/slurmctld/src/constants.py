@@ -27,6 +27,10 @@ SLURMRESTD_INTEGRATION_NAME = "slurmrestd"
 HA_MOUNT_INTEGRATION_NAME = "mount"
 HA_MOUNT_LOCATION = "/srv/slurmctld-statefs"
 
+MAIL_INTEGRATION_NAME = "smtp"
+MAILPROG_PATH = "/usr/bin/slurm-spool-mail"
+SLURM_MAIL_CONFIG_PATH = "/etc/slurm-mail/slurm-mail.conf"
+
 SLURMCTLD_PORT = 6817
 PROMETHEUS_EXPORTER_PORT = 9092
 
@@ -49,7 +53,6 @@ DEFAULT_SLURM_CONFIG = {
     "authtype": "auth/slurm",
     "credtype": "cred/slurm",
     "grestypes": ["gpu"],
-    "mailprog": "/usr/bin/mail.mailutils",
     "maxnodecount": 65533,
     "plugindir": ["/usr/lib/x86_64-linux-gnu/slurm-wlm"],
     "plugstackconfig": "/etc/slurm/plugstack.conf.d/plugstack.conf",

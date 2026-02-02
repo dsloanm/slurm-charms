@@ -13,4 +13,4 @@ dependencies = [
 ]
 
 [tool.repository]
-libraries = ["grafana-agent.cos_agent", "filesystem-client.mount_info"]
+libraries = ["grafana-agent.cos_agent", "filesystem-client.mount_info", "smtp-integrator.smtp"]
