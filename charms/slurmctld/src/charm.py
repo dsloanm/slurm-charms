@@ -23,6 +23,10 @@ from typing import cast
 import mail
 import ops
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
+from charms.smtp_integrator.v0.smtp import (
+    SmtpDataAvailableEvent,
+    SmtpRequires,
+)
 from config import (
     get_controllers,
     init_config,
@@ -89,11 +93,6 @@ from state import (
     shared_state_mounted,
     slurmctld_installed,
     slurmctld_is_active,
-)
-
-from charms.smtp_integrator.v0.smtp import (
-    SmtpDataAvailableEvent,
-    SmtpRequires,
 )
 
 logger = logging.getLogger(__name__)
