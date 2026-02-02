@@ -264,8 +264,7 @@ def test_gpu_job_submission(juju: jubilant.Juju) -> None:
     )
 
     # Mock GPU info in /proc
-    gpu_information = textwrap.dedent(
-        """\
+    gpu_information = textwrap.dedent("""\
             Model: 		 Mock GPU
             IRQ:   		 185
             GPU UUID: 	 GPU-12345678-90ab-cdef-1234-567890abcdef
@@ -277,8 +276,7 @@ def test_gpu_job_submission(juju: jubilant.Juju) -> None:
             Device Minor: 	 0
             GPU Firmware: 	 123.456.78
             GPU Excluded:	 No
-        """
-    )
+        """)
     juju.exec("mkdir -p /tmp/proc/driver/nvidia/gpus/0000:01:00.0/", unit=slurmd_unit)
     juju.exec(
         f"echo '{gpu_information}' > /tmp/proc/driver/nvidia/gpus/0000:01:00.0/information",

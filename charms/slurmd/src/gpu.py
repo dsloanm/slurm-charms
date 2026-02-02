@@ -18,10 +18,9 @@ import logging
 
 # ubuntu-drivers requires apt_pkg for package operations
 import apt_pkg  # pyright: ignore [reportMissingImports]
+import charms.operator_libs_linux.v0.apt as apt
 import pynvml
 import UbuntuDrivers.detect  # pyright: ignore [reportMissingImports]
-
-import charms.operator_libs_linux.v0.apt as apt
 
 _logger = logging.getLogger(__name__)
 

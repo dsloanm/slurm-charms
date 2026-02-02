@@ -55,12 +55,10 @@ class TestSlurmctldHA:
         etc_slurm = Path("/etc/slurm")
         statesave = Path(DEFAULT_SLURM_CONFIG["statesavelocation"])
 
-        slurm_conf_init = textwrap.dedent(
-            f"""\
+        slurm_conf_init = textwrap.dedent(f"""\
             slurmctldhost=hostname
             statesavelocation={statesave}
-        """
-        )
+        """)
         fs.create_file(etc_slurm / "slurm.conf", contents=slurm_conf_init)
 
         # Simulate HA filesystem being mounted
@@ -88,12 +86,10 @@ class TestSlurmctldHA:
         )
 
         if leader:
-            slurm_conf_final = textwrap.dedent(
-                f"""\
+            slurm_conf_final = textwrap.dedent(f"""\
                 slurmctldhost=hostname
                 statesavelocation={ha_statesave}
-            """
-            )
+            """)
 
             assert (ha_etc_slurm / "slurm.conf").read_text() == slurm_conf_final
             assert rsync_call in mock_subprocess_run.mock_calls
@@ -115,18 +111,14 @@ class TestSlurmctldHA:
         ha_etc_slurm = ha_fs_prefix / "etc" / "slurm"
         ha_statesave = ha_fs_prefix / statesave.name
 
-        slurm_conf_source = textwrap.dedent(
-            f"""\
+        slurm_conf_source = textwrap.dedent(f"""\
             slurmctldhost=hostname0
             statesavelocation={statesave}
-        """
-        )
-        slurm_conf_target = textwrap.dedent(
-            f"""\
+        """)
+        slurm_conf_target = textwrap.dedent(f"""\
             slurmctldhost=hostname1
             statesavelocation={ha_statesave}
-        """
-        )
+        """)
         fs.create_file(etc_slurm / "slurm.conf", contents=slurm_conf_source)
         fs.create_file(ha_etc_slurm / "slurm.conf", contents=slurm_conf_target)
         fs.create_file(ha_statesave / "myfile", contents="some data")

@@ -22,6 +22,7 @@ from typing import cast
 import gpu
 import ops
 import rdma
+from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 from config import (
     State,
     get_partition,
@@ -44,8 +45,6 @@ from hpc_libs.utils import StopCharm, reconfigure, refresh
 from slurm_ops import SlurmdManager, SlurmOpsError, scontrol
 from slurmutils import ModelError, Node
 from state import check_slurmd, slurmd_installed
-
-from charms.grafana_agent.v0.cos_agent import COSAgentProvider
 
 logger = logging.getLogger(__name__)
 reconfigure = reconfigure(hook=reconfigure_slurmd)
