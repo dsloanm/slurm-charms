@@ -324,13 +324,18 @@ def test_gpu_job_submission(juju: jubilant.Juju) -> None:
             assert sackd_result.stdout == slurmd_result.stdout
 
     logger.info("cleaning up mock GPU setup")
-    juju.exec("sudo umount /sys/bus/pci/drivers", unit=slurmd_unit)
-    juju.exec("sudo umount /proc/driver", unit=slurmd_unit)
-    juju.exec("sudo umount /dev/nvidia0", unit=slurmd_unit)
-    juju.exec("sudo rm -rf /tmp/sys", unit=slurmd_unit)
-    juju.exec("sudo rm -rf /tmp/proc", unit=slurmd_unit)
-    juju.exec("sudo rm -f /dev/nvidia0", unit=slurmd_unit)
-    juju.exec("sudo sed -i \"s/ gres=gpu:mock_gpu:1'/'/\" /etc/default/slurmd", unit=slurmd_unit)
+    cleanup_commands = [
+        "sudo umount /sys/bus/pci/drivers",
+        "sudo umount /proc/driver",
+        "sudo umount /dev/nvidia0",
+        "sudo rm -rf /tmp/sys",
+        "sudo rm -rf /tmp/proc",
+        "sudo rm -f /dev/nvidia0",
+        "sudo sed -i \"s/ gres=gpu:mock_gpu:1'/'/\" /etc/default/slurmd",
+    ]
+    for command in cleanup_commands:
+        juju.exec(command, unit=slurmd_unit)
+
     juju.config(SLURMCTLD_APP_NAME, reset="cgroup-parameters")
     juju.exec(f"sudo scontrol delete NodeName={slurmd_nodename}", unit=sackd_unit)
     juju.exec("sudo systemctl restart slurmd", unit=slurmd_unit)
