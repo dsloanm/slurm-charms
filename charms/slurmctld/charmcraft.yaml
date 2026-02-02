@@ -46,6 +46,9 @@ requires:
     interface: influxdb-api
   oci-runtime:
     interface: slurm-oci-runtime
+  smtp:
+    interface: smtp
+    limit: 1
 
 provides:
   cos-agent:
@@ -104,6 +107,11 @@ config:
       default: ""
       description: |
         User supplied configuration for `cgroup.conf`.
+
+    email-from-name:
+      default: "Charmed HPC Admin"
+      type: string
+      description: Name to appear in the signature of email notifications sent by Slurm.
 
 actions:
   show-current-config:
