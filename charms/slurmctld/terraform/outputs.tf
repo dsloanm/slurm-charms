@@ -23,6 +23,7 @@ output "requires" {
     slurmrestd = "slurmrestd"
     login-node = "login-node"
     influxdb   = "influxdb"
+    smtp       = "smtp"
   }
 }
 
