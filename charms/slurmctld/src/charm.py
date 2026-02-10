@@ -551,6 +551,7 @@ class SlurmctldCharm(ops.CharmBase):
         logger.info("successfully updated state of node(s) %s to '%s'", nodes, state)
 
     @refresh
+    @block_unless(slurmctld_installed)
     def _on_smtp_relation_created(self, event: ops.RelationCreatedEvent) -> None:
         """Set up SMTP relation."""
         message = "installing slurm-mail package"
