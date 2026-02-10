@@ -175,6 +175,30 @@ def test_slurmctld_mail_job_fail(juju: jubilant.Juju, smtp_handler) -> None:
 
 
 @pytest.mark.order(17)
+def test_slurmctld_mail_job_begins_custom_signature(juju: jubilant.Juju, smtp_handler) -> None:
+    """Test custom signature on a notification email when a job begins."""
+    sackd_unit = f"{SACKD_APP_NAME}/0"
+    to_address = "furtheruser@localhost"
+    from_name = "Integration Test Suite"
+    subject_pattern = r"^Job charmed-hpc-[\w-]{4}\.\d+: Began$"
+    content_pattern = (
+        r"Your job \d+ has started on charmed-hpc-[\w-]{4}\."
+        r".*?"
+        r"Regards,"
+        r".*?"
+        rf"{from_name}"
+    )
+    juju.config(SLURMCTLD_APP_NAME, {"email-from-name": from_name})
+
+    juju.exec(
+        f"srun --partition {SLURMD_APP_NAME} --mail-user={to_address} --mail-type=BEGIN sleep 1",
+        unit=sackd_unit,
+    )
+
+    smtp_handler.assert_mail(to_address, subject_pattern, content_pattern)
+
+
+@pytest.mark.order(18)
 def test_slurmctld_mail_remove(juju: jubilant.Juju) -> None:
     """Test SMTP integrator application removal and breaking of integration with slurmctld."""
     juju.remove_application(SMTP_INTEGRATOR_APP_NAME)
