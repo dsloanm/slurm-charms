@@ -51,8 +51,7 @@ def configure(**kwargs) -> Path:
 
     Raises:
         FileNotFoundError: if the configuration file does not exist.
-        OSError: if unable to set configuration file permissions or ownership.
-        configparser.NoSectionError: if the slurm-send-mail section is missing from the config.
+        MailOpsError: if an error occurs during configuration.
     """
     # Option name and formatter
     supported_options = {
@@ -86,10 +85,14 @@ def configure(**kwargs) -> Path:
 
         config_key, formatter = supported_options[option]
         new_value = formatter(value)
-        # Fall back to the value `None` if the key does not exist
-        if config.get(section, config_key, fallback=None) != new_value:
-            config.set(section, config_key, new_value)
-            config_changed = True
+
+        try:
+            # Fall back to the value `None` if the key does not exist
+            if config.get(section, config_key, fallback=None) != new_value:
+                config.set(section, config_key, new_value)
+                config_changed = True
+        except configparser.NoSectionError as e:
+            raise MailOpsError(f"configuration file missing required section: {section}") from e
 
     if not config_changed:
         logger.info("no changes required to slurm-mail configuration")
@@ -105,8 +108,7 @@ def configure(**kwargs) -> Path:
         swap.chmod(0o640)
         shutil.chown(swap, "root", "slurm")
     except OSError as e:
-        e.add_note(f"failed to set permissions or ownership for {swap}")
-        raise
+        raise MailOpsError(f"failed to set permissions or ownership for {swap}") from e
 
     swap.replace(config_path)
     return Path(MAILPROG_PATH)

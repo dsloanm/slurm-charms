@@ -344,6 +344,11 @@ class TestSlurmctldCharm:
             remote_app_name="smtp-integrator",
             remote_app_data=smtp_data,
         )
+        peer_integration = testing.PeerRelation(
+            endpoint=PEER_INTEGRATION_NAME,
+            interface="slurmctld-peer",
+            local_app_data={"cluster_name": '"charmed-hpc"'},
+        )
 
         # Initial slurm-mail.conf
         # Includes parameters to remain unchanged to confirm only relevant lines are updated
@@ -377,7 +382,9 @@ class TestSlurmctldCharm:
 
         with mock_charm(
             mock_charm.on.relation_changed(smtp_integration),
-            testing.State(leader=leader, relations={smtp_integration}, secrets={secret}),
+            testing.State(
+                leader=leader, relations={smtp_integration, peer_integration}, secrets={secret}
+            ),
         ) as manager:
             slurmctld = manager.charm.slurmctld
             mocker.patch.object(slurmctld, "is_installed", return_value=True)
