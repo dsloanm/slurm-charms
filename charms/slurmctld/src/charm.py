@@ -262,7 +262,7 @@ class SlurmctldCharm(ops.CharmBase):
         try:
             mail.configure(from_name=self.config["email-from-name"])
         except FileNotFoundError:
-            logger.warning("slurm-mail not installed. skipping mail configuration")
+            logger.debug("slurm-mail not installed. skipping mail configuration")
 
         # Only the leader handles configuration changes for the slurmctld service. Non-leader units
         # read configuration managed by the leader.
@@ -571,6 +571,7 @@ class SlurmctldCharm(ops.CharmBase):
 
         self.unit.status = ops.ActiveStatus()
 
+    @refresh
     @reconfigure
     @block_unless(slurmctld_installed)
     def _on_smtp_data_available(self, event: SmtpDataAvailableEvent) -> None:
@@ -586,14 +587,24 @@ class SlurmctldCharm(ops.CharmBase):
 
         use_tls = event.transport_security in ("starttls", "tls")
 
-        mail_prog = mail.configure(
-            server=event.host,
-            port=event.port,
-            use_tls=use_tls,
-            user=event.user,
-            password=password,
-            from_name=self.config["email-from-name"],
-        )
+        try:
+            mail_prog = mail.configure(
+                server=event.host,
+                port=event.port,
+                use_tls=use_tls,
+                user=event.user,
+                password=password,
+                from_name=self.config["email-from-name"],
+            )
+        except mail.MailOpsError as e:
+            logger.error(e.message)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "failed to configure slurm-mail. See `juju debug-log` for details"
+                )
+            )
+
         if self.unit.is_leader():
             with self.slurmctld.config.edit() as config:
                 config.mail_prog = str(mail_prog)
@@ -621,7 +632,8 @@ class SlurmctldCharm(ops.CharmBase):
 
         if self.unit.is_leader():
             with self.slurmctld.config.edit() as config:
-                del config.mail_prog
+                if config.mail_prog:
+                    del config.mail_prog
 
         try:
             mail.uninstall()
