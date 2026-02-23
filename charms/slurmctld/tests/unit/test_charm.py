@@ -328,7 +328,7 @@ class TestSlurmctldCharm:
 
     def test_on_smtp_data_available(self, mock_charm, mocker: MockerFixture, leader) -> None:
         """Test update of SMTP data."""
-        password = "password1234"
+        password = "password%1234"
         secret = testing.Secret({"password": password}, owner="app")
         smtp_data = {
             "user": "myuser",
