@@ -68,7 +68,7 @@ def configure(**kwargs) -> Path:
     if not config_path.exists():
         raise FileNotFoundError(f"configuration file not found: {config_path}")
 
-    config = configparser.ConfigParser()
+    config = configparser.RawConfigParser()
     # Preserve camelCase keys, such as smtpServer
     config.optionxform = str  # pyright: ignore[reportAttributeAccessIssue]
     config.read(config_path)
