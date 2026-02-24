@@ -563,8 +563,6 @@ class SlurmctldCharm(ops.CharmBase):
                 )
             )
 
-        self.unit.status = ops.ActiveStatus()
-
     @refresh
     @reconfigure
     @block_unless(slurmctld_installed)
@@ -603,8 +601,6 @@ class SlurmctldCharm(ops.CharmBase):
             with self.slurmctld.config.edit() as config:
                 config.mail_prog = str(mail_prog)
 
-        self.unit.status = ops.ActiveStatus()
-
     def _on_smtp_relation_departed(self, event: ops.RelationDepartedEvent) -> None:
         """Handle SMTP relation departing."""
         if event.departing_unit == self.unit:
@@ -638,8 +634,6 @@ class SlurmctldCharm(ops.CharmBase):
                     "failed to uninstall slurm-mail package. See `juju debug-log` for details"
                 )
             )
-
-        self.unit.status = ops.ActiveStatus()
 
     def _merge_controller_data(self, app: SackdRequirer | SlurmdRequirer, new_endpoints) -> None:
         """Merge new controller endpoints with existing controller data."""
