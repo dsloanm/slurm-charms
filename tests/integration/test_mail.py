@@ -191,7 +191,7 @@ def test_slurmctld_mail_job_begins_custom_signature(juju: jubilant.Juju, smtp_ha
     juju.config(SLURMCTLD_APP_NAME, {"email-from-name": from_name})
 
     juju.exec(
-        f"srun --partition {SLURMD_APP_NAME} --mail-user={to_address} --mail-type=BEGIN sleep 1",
+        f"srun --time=1 --partition {SLURMD_APP_NAME} --mail-user={to_address} --mail-type=BEGIN sleep 1",
         unit=sackd_unit,
     )
 
