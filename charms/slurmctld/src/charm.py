@@ -148,9 +148,12 @@ class SlurmctldCharm(ops.CharmBase):
             self._on_oci_runtime_disconnected,
         )
 
-        self._grafana_agent = COSAgentProvider(
+        self._opentelemetry_collector = COSAgentProvider(
             self,
-            metrics_endpoints=[{"path": "/metrics", "port": 9092}],
+            metrics_endpoints=[
+                {"path": f"/metrics/{endpoint}", "port": SLURMCTLD_PORT}
+                for endpoint in ["jobs", "nodes", "partitions", "scheduler", "jobs-users-accts"]
+            ],
             metrics_rules_dir="./src/cos/alert_rules/prometheus",
             dashboard_dirs=["./src/cos/grafana_dashboards"],
             recurse_rules_dirs=True,
@@ -163,13 +166,6 @@ class SlurmctldCharm(ops.CharmBase):
 
         try:
             self.slurmctld.install()
-
-            self.slurmctld.exporter.service.stop()
-            self.slurmctld.exporter.service.disable()
-            self.slurmctld.exporter.args = [
-                "-slurm.collect-diags",
-                "-slurm.collect-limits",
-            ]
 
             self.slurmctld.service.stop()
             self.slurmctld.service.disable()
@@ -223,8 +219,6 @@ class SlurmctldCharm(ops.CharmBase):
 
             self.slurmctld.service.enable()
             self.slurmctld.service.restart()
-            self.slurmctld.exporter.service.enable()
-            self.slurmctld.exporter.service.restart()
         except SlurmOpsError as e:
             logger.error(e.message)
             event.defer()

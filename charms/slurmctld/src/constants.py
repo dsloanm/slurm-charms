@@ -51,6 +51,7 @@ DEFAULT_SLURM_CONFIG = {
     "grestypes": ["gpu"],
     "mailprog": "/usr/bin/mail.mailutils",
     "maxnodecount": 65533,
+    "metricstype": "metrics/openmetrics",
     "plugindir": ["/usr/lib/x86_64-linux-gnu/slurm-wlm"],
     "plugstackconfig": "/etc/slurm/plugstack.conf.d/plugstack.conf",
     "proctracktype": "proctrack/linuxproc" if is_container() else "proctrack/cgroup",

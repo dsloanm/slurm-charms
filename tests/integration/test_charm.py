@@ -103,16 +103,19 @@ def test_slurm_services_are_active(juju: jubilant.Juju) -> None:
 
 
 @pytest.mark.order(3)
-def test_slurm_prometheus_exporter_service_is_active(juju: jubilant.Juju) -> None:
+def test_slurm_metrics_are_accessible(juju: jubilant.Juju) -> None:
     """Test that the `prometheus-slurm-exporter` service is active within `controller/0`."""
     unit = f"{SLURMCTLD_APP_NAME}/0"
 
     logger.info(
-        "testing that the 'prometheus-slurm-exporter' service is active within unit '%s/0'",
+        "testing that the 'slurmctld' metrics endpoint is accessible on port 6817 on unit '%s'",
         unit,
     )
-    result = juju.exec("systemctl is-active prometheus-slurm-exporter", unit=unit)
-    assert result.stdout.strip() == "active"
+    result = juju.exec(
+        "curl --silent --output /dev/null --write-out '%{http_code}\n' localhost:6817/metrics",
+        unit=unit,
+    )
+    assert result.stdout.strip() == "200"
 
 
 @pytest.mark.order(4)
