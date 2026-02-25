@@ -1,4 +1,4 @@
-# Copyright 2025 Canonical Ltd.
+# Copyright 2025-2026 Canonical Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,11 +14,7 @@
 
 """Classes and functions for composing Slurm service managers."""
 
-__all__ = [
-    "SecretManager",
-    "PrometheusExporterManager",
-    "SlurmManager",
-]
+__all__ = ["SecretManager", "SlurmManager",]
 
 import base64
 import logging
@@ -85,7 +81,6 @@ fy6i2AnB3kUI27D4HY2YSlXLSRbjiSxTfVwNCzDsIh7Czefsm6ITK2+cVWs0hNQ=
 =cs1s
 -----END PGP PUBLIC KEY BLOCK-----
 """
-UBUNTU_HPC_EXPERIMENTAL_PPA_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/experimental/ubuntu"
 UBUNTU_HPC_SLURM_PPA_URI = "https://ppa.launchpadcontent.net/ubuntu-hpc/slurm-wlm-25.11/ubuntu"
 
 
@@ -164,7 +159,6 @@ class _AptManager(OpsManager):
 
     def install(self) -> None:
         """Install Slurm using the `slurm-wlm` Debian package set."""
-        self._init_ppa(UBUNTU_HPC_EXPERIMENTAL_PPA_URI)
         self._init_ppa(UBUNTU_HPC_SLURM_PPA_URI)
         self._install_service()
         self._create_state_save_location()
@@ -244,7 +238,7 @@ class _AptManager(OpsManager):
             case "sackd":
                 packages.extend(["slurm-client"])
             case "slurmctld":
-                packages.extend(["libpmix-dev", "mailutils", "prometheus-slurm-exporter"])
+                packages.extend(["libpmix-dev", "mailutils"])
             case "slurmd":
                 packages.extend(["slurm-client", "libpmix-dev", "openmpi-bin"])
             case "slurmrestd":
@@ -553,28 +547,6 @@ class _SlurmSecretManager(SecretManager):
         return self._file
 
 
-class PrometheusExporterManager:
-    """Manage `prometheus-slurm-exporter` service operations."""
-
-    def __init__(self, ops_manager: OpsManager) -> None:
-        self.service = ops_manager.service_manager_for("prometheus-slurm-exporter")
-        self._env_manager = ops_manager.env_manager_for("prometheus-slurm-exporter")
-
-    @property
-    def args(self) -> list[str]:
-        """Arguments passed to the `prometheus-slurm-exporter` executable."""
-        args = self._env_manager.get("ARGS") or ""
-        return shlex.split(args)
-
-    @args.setter
-    def args(self, args: Iterable[str]) -> None:
-        self._env_manager.set({"ARGS": shlex.join(args)})
-
-    @args.deleter
-    def args(self) -> None:
-        self._env_manager.unset("ARGS")
-
-
 class SlurmManager(ABC):
     """Base class for composing Slurm service managers."""
 
@@ -586,7 +558,6 @@ class SlurmManager(ABC):
         self.service = self._ops_manager.service_manager_for(service)
         self.key = _SlurmSecretManager(self._ops_manager, user=self.user, group=self.group)
         self.jwt = _JWTSecretManager(self._ops_manager, user=self.user, group=self.group)
-        self.exporter = PrometheusExporterManager(self._ops_manager)
         self.install = self._ops_manager.install
         self.is_installed = self._ops_manager.is_installed
         self.version = self._ops_manager.version
