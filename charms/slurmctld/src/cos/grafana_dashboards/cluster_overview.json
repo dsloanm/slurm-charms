@@ -1,0 +1,2538 @@
+{
+  "__inputs": [],
+  "__elements": {},
+  "__requires": [
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "9.5.21"
+    },
+    {
+      "type": "panel",
+      "id": "piechart",
+      "name": "Pie chart",
+      "version": ""
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total nodes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum(slurm_partition_cpus{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total CPUs",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "decmbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 8,
+        "y": 1
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "sum(slurm_partition_nodes_mem_avail{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "Total memory available"
+        }
+      ],
+      "title": "Total memory available",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total jobs",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_partitions{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total partitions",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 0,
+        "y": 8
+      },
+      "id": 24,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "(slurm_nodes_alloc{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"} / slurm_nodes{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}) * 100",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total node utilization",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 4,
+        "y": 8
+      },
+      "id": 11,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(slurm_partition_nodes_cpus_alloc{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}) / sum(slurm_partition_cpus{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})) * 100",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total CPU utilization",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 8,
+        "y": 8
+      },
+      "id": 12,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "pluginVersion": "9.5.21",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "(sum(slurm_partition_nodes_mem_alloc{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}) / sum(slurm_partition_nodes_mem_avail{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"})) * 100",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total memory utilization",
+      "type": "gauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 27,
+      "panels": [],
+      "title": "Job statistics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_completing{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completing jobs",
+          "range": true,
+          "refId": "Completing jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_running{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "Running jobs",
+          "range": true,
+          "refId": "Running jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_pending{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Pending jobs",
+          "range": true,
+          "refId": "Pending jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_completed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completed jobs",
+          "range": true,
+          "refId": "Completed jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Total jobs",
+          "range": true,
+          "refId": "Total jobs"
+        }
+      ],
+      "title": "Running/Pending/Completing jobs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_timeout{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "Timed out jobs",
+          "range": true,
+          "refId": "Timed out jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_failed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Failed jobs",
+          "range": true,
+          "refId": "Failed jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_node_failed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Failed jobs (due to Node Failure)",
+          "range": true,
+          "refId": "Failed jobs (Node failure)"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_suspended{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Suspended jobs",
+          "range": true,
+          "refId": "Suspended jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_cancelled{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Cancelled jobs",
+          "range": true,
+          "refId": "Cancelled jobs"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_jobs_preempted{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Preempted jobs",
+          "range": true,
+          "refId": "Preempted jobs"
+        }
+      ],
+      "title": "Failed/Timed out/Suspended/Cancelled/Preempted jobs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 29,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_bootfail{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "BootFail",
+          "range": true,
+          "refId": "BootFail"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_cancelled{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Cancelled",
+          "range": true,
+          "refId": "Cancelled"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_completed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completed",
+          "range": true,
+          "refId": "Completed"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_completing{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completing",
+          "range": true,
+          "refId": "Completing"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_configuring{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Configuring",
+          "range": true,
+          "refId": "Configuring"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_deadline{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Deadline",
+          "range": true,
+          "refId": "Deadline"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_expediting{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Expediting",
+          "range": true,
+          "refId": "Expediting"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_failed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Failed",
+          "range": true,
+          "refId": "Failed"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_finished{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Finished",
+          "range": true,
+          "refId": "Finished"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_hold{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Hold",
+          "range": true,
+          "refId": "Hold"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_node_failed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Node Failed",
+          "range": true,
+          "refId": "Node Failed"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_outofmemory{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Out of Memory",
+          "range": true,
+          "refId": "Out of Memory"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_pending{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Pending",
+          "range": true,
+          "refId": "Pending"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_powerup_node{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "PowerUp Node",
+          "range": true,
+          "refId": "PowerUp Node"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_preempted{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Preempted",
+          "range": true,
+          "refId": "Preempted"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_requeued{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Requeued",
+          "range": true,
+          "refId": "Requeued"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_resizing{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Resizing",
+          "range": true,
+          "refId": "Resizing"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_running{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Running",
+          "range": true,
+          "refId": "Running"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_signaling{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Signaling",
+          "range": true,
+          "refId": "Signaling"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_stageout{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "StageOut",
+          "range": true,
+          "refId": "StageOut"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_suspended{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Suspended",
+          "range": true,
+          "refId": "Suspended"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_jobs_timeout{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Timeout",
+          "range": true,
+          "refId": "Timeout"
+        }
+      ],
+      "title": "Job state distribution",
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 28,
+      "panels": [],
+      "title": "Node statistics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "left",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 0,
+        "y": 34
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "timezone": [
+          ""
+        ],
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "slurm_nodes_alloc{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "interval": "",
+          "legendFormat": "Allocated nodes",
+          "range": true,
+          "refId": "Allocated nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_mixed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Mixed nodes",
+          "range": true,
+          "refId": "Mixed nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_completing{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completing nodes",
+          "range": true,
+          "refId": "Completing nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_idle{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Idle nodes",
+          "range": true,
+          "refId": "Idle nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Total nodes",
+          "range": true,
+          "refId": "Total nodes"
+        }
+      ],
+      "title": "Allocated/Mixed/Idle nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "left",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 8,
+        "y": 34
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_down{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "Down nodes",
+          "range": true,
+          "refId": "Down nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_draining{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Draining nodes",
+          "range": true,
+          "refId": "Draining nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_fail{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Failed nodes",
+          "range": true,
+          "refId": "Failed nodes"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "builder",
+          "expr": "slurm_nodes_noresp{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Nodes not responding",
+          "range": true,
+          "refId": "Nodes not responding"
+        }
+      ],
+      "title": "Down/Draining/Error nodes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prometheusds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 17,
+        "w": 8,
+        "x": 16,
+        "y": 34
+      },
+      "id": 30,
+      "options": {
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_alloc{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "legendFormat": "Allocated",
+          "range": true,
+          "refId": "Allocated"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_blocked{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Blocked",
+          "range": true,
+          "refId": "Blocked"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_completing{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Completing",
+          "range": true,
+          "refId": "Completing"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_down{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Down",
+          "range": true,
+          "refId": "Down"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_drain{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Drain",
+          "range": true,
+          "refId": "Drain"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_drained{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Drained",
+          "range": true,
+          "refId": "Drained"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_draining{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Draining",
+          "range": true,
+          "refId": "Draining"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_fail{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Fail",
+          "range": true,
+          "refId": "Fail"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_idle{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Idle",
+          "range": true,
+          "refId": "Idle"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_maint{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Maintenance",
+          "range": true,
+          "refId": "Maintenance"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_mixed{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Mixed",
+          "range": true,
+          "refId": "Mixed"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_noresp{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "No Response",
+          "range": true,
+          "refId": "No Response"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "editorMode": "code",
+          "expr": "slurm_nodes_unknown{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+          "hide": false,
+          "legendFormat": "Unknown",
+          "range": true,
+          "refId": "Unknown"
+        }
+      ],
+      "title": "Node state distribution",
+      "type": "piechart"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "id": 8,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 4,
+            "x": 0,
+            "y": 52
+          },
+          "id": 18,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_schedule_queue_len{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Job queue size",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              },
+              "unit": "\u00b5s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 10,
+            "x": 4,
+            "y": 52
+          },
+          "id": 19,
+          "options": {
+            "legend": {
+              "calcs": [
+                "min",
+                "mean"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_schedule_cycle_last{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "Last Cycle Time",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_sched_mean_cycle{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "hide": false,
+              "legendFormat": "Mean Cycle Time",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Scheduler cycles",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 10,
+            "x": 14,
+            "y": 52
+          },
+          "id": 23,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_sched_mean_depth_cycle{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "Mean of processed jobs during scheduling cycles",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Scheduler depth mean",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 4,
+            "x": 0,
+            "y": 65
+          },
+          "id": 22,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_bf_queue_len{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Backfill queue size",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              },
+              "unit": "\u00b5s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 10,
+            "x": 4,
+            "y": 65
+          },
+          "id": 20,
+          "options": {
+            "legend": {
+              "calcs": [
+                "min",
+                "mean",
+                "sum"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_bf_cycle_last{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "Backfill Last Cycle",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_bf_mean_cycle{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "hide": false,
+              "legendFormat": "Backfill Mean Cycle",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Backfill scheduler cycles",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 13,
+            "w": 10,
+            "x": 14,
+            "y": 65
+          },
+          "id": 21,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_bf_depth_mean{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "Mean of processed jobs during backfilling scheduling cycles",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Backfill depth mean",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 0,
+            "y": 78
+          },
+          "id": 13,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_server_thread_cnt{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Scheduler threads",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 6,
+            "y": 78
+          },
+          "id": 14,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_agent_cnt{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Agents",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 12,
+            "y": 78
+          },
+          "id": 16,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_agent_queue_size{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Agent queue size",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prometheusds}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 6,
+            "x": 18,
+            "y": 78
+          },
+          "id": 17,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "pluginVersion": "9.5.21",
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${prometheusds}"
+              },
+              "editorMode": "code",
+              "expr": "slurm_slurmdbd_queue_size{juju_model_uuid=~\"$juju_model_uuid\", juju_model=~\"$juju_model\",juju_application=~\"$juju_application\", juju_unit=~\"$juju_unit\"}",
+              "legendFormat": "__auto",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "SlurmDBD queue size",
+          "type": "stat"
+        }
+      ],
+      "title": "Slurm controller statistics",
+      "type": "row"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "charmed-hpc"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-5m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Cluster Overview",
+  "uid": "cf173d17-b1af-4137-a3ef-5300ca4ed18e",
+  "version": 15,
+  "weekStart": ""
+}
