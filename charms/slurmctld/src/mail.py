@@ -22,7 +22,7 @@ from pathlib import Path
 from constants import DEFAULT_SLURM_MAIL_CONFIG, MAILPROG_PATH, SLURM_MAIL_CONFIG_PATH
 from hpc_libs.machine import apt
 
-logger = logging.getLogger()
+_logger = logging.getLogger(__name__)
 
 
 class MailOpsError(Exception):
@@ -74,7 +74,7 @@ def configure(**kwargs) -> Path:
     # Ensure the required section exists, reinitialize if not
     section = "slurm-send-mail"
     if not config.has_section(section):
-        logger.warning(
+        _logger.warning(
             "configuration file damaged: missing required section '%s'. reinitializing", section
         )
         _initialize_config_file(config_path)
@@ -84,7 +84,7 @@ def configure(**kwargs) -> Path:
     config_changed = False
     for option, value in kwargs.items():
         if option not in supported_options:
-            logger.warning("unknown configuration parameter: %s", option)
+            _logger.warning("unknown configuration parameter: %s", option)
             continue
 
         if value is None:
@@ -99,7 +99,7 @@ def configure(**kwargs) -> Path:
             config_changed = True
 
     if not config_changed:
-        logger.info("no changes required to slurm-mail configuration")
+        _logger.info("no changes required to slurm-mail configuration")
         return Path(MAILPROG_PATH)
 
     _write_config_file(config_path, config)
@@ -146,12 +146,12 @@ def _initialize_config_file(
         MailOpsError: if an error occurs during configuration file initialization.
     """
     if config_path.exists():
-        logger.warning(
+        _logger.warning(
             "configuration file already exists: %s. skipping initialization", config_path
         )
         return
 
-    logger.info("configuration file not found: %s. creating new configuration file", config_path)
+    _logger.info("configuration file not found: %s. creating new configuration file", config_path)
 
     default_config = configparser.RawConfigParser()
     # Preserve camelCase keys, such as smtpServer

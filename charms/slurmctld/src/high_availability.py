@@ -30,7 +30,7 @@ from charms.filesystem_client.v0.mount_info import (
 from constants import HA_MOUNT_LOCATION
 from hpc_libs.machine import call
 
-logger = logging.getLogger()
+_logger = logging.getLogger(__name__)
 
 
 class SlurmctldHA(ops.Object):
@@ -52,13 +52,13 @@ class SlurmctldHA(ops.Object):
         for relation in self._mount.relations:
             self._mount.set_mount_info(relation.id, MountInfo(mountpoint=HA_MOUNT_LOCATION))
         status_message = f"Requesting file system mount: {HA_MOUNT_LOCATION}"
-        logger.debug(status_message)
+        _logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 
     def _on_mounted_filesystem(self, event: MountedFilesystemEvent) -> None:
         """Handle filesystem-client mounted event."""
         if self._charm.unit.is_leader() and not self._charm.slurmctld.config.path.exists():
-            logger.debug("slurm.conf not found. deferring event")
+            _logger.debug("slurm.conf not found. deferring event")
             event.defer()
             return
 
@@ -70,13 +70,13 @@ class SlurmctldHA(ops.Object):
         try:
             self._migrate_etc_data(etc_source, target / "etc" / "slurm")
         except shutil.Error:
-            logger.exception("failed to migrate %s to %s. deferring event", etc_source, target)
+            _logger.exception("failed to migrate %s to %s. deferring event", etc_source, target)
             event.defer()
             return
 
         if not self._charm.unit.is_leader():
             # Non-leaders have no more data to migrate
-            logger.debug("storage mounted. starting unit")
+            _logger.debug("storage mounted. starting unit")
             self._charm.on.start.emit()
             return
 
@@ -87,7 +87,7 @@ class SlurmctldHA(ops.Object):
         try:
             self._migrate_state_save_location_data(state_save_source, target)
         except CalledProcessError:
-            logger.exception(
+            _logger.exception(
                 "failed to migrate %s to %s. deferring event", state_save_source, target
             )
             event.defer()
@@ -97,7 +97,7 @@ class SlurmctldHA(ops.Object):
         new_state_save_location = target / state_save_source.name
         with self._charm.slurmctld.config.edit() as config:
             config.state_save_location = str(new_state_save_location)
-        logger.debug("state save location updated to %s", new_state_save_location)
+        _logger.debug("state save location updated to %s", new_state_save_location)
         self._charm.on.start.emit()
 
     def _migrate_etc_data(self, source: Path, target: Path) -> None:
@@ -120,13 +120,13 @@ class SlurmctldHA(ops.Object):
         """
         # Nothing to do if target already correctly symlinked
         if source.is_symlink() and source.resolve() == target:
-            logger.debug("%s -> %s sylink already exists", source, target)
+            _logger.debug("%s -> %s sylink already exists", source, target)
             return
 
         if source.exists():
             if self._charm.unit.is_leader():
                 if not target.exists():
-                    logger.debug("leader copying %s to %s", source, target)
+                    _logger.debug("leader copying %s to %s", source, target)
 
                     def copy_preserve_ids(source, target):
                         """Preserve owner and group IDs of copied files."""
@@ -139,17 +139,17 @@ class SlurmctldHA(ops.Object):
                         source, target, copy_function=copy_preserve_ids, dirs_exist_ok=True
                     )
                 else:
-                    logger.warning("%s already exists. aborting copy from %s", target, source)
+                    _logger.warning("%s already exists. aborting copy from %s", target, source)
 
             # Timestamp to avoid overwriting any existing backup
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_target = Path(f"{source}_{timestamp}")
-            logger.debug("backing up %s to %s", source, backup_target)
+            _logger.debug("backing up %s to %s", source, backup_target)
             shutil.move(source, backup_target)
         else:
-            logger.warning("%s not found. unable to backup existing slurm data", source)
+            _logger.warning("%s not found. unable to backup existing slurm data", source)
 
-        logger.debug("symlinking %s to %s", source, target)
+        _logger.debug("symlinking %s to %s", source, target)
         source.symlink_to(target)
 
     def _migrate_state_save_location_data(self, source: Path, target: Path):
@@ -171,11 +171,11 @@ class SlurmctldHA(ops.Object):
         """
         checkpoint_target = target / source.name
         if checkpoint_target.exists():
-            logger.warning("%s already exists. aborting copy from %s", checkpoint_target, source)
+            _logger.warning("%s already exists. aborting copy from %s", checkpoint_target, source)
             return
 
         status_message = f"Migrating {source} to {target}"
-        logger.debug(status_message)
+        _logger.debug(status_message)
         self._charm.unit.status = ops.MaintenanceStatus(status_message)
 
         # Perform initial copy of data while slurmctld.service is still running then stop and sync
@@ -185,7 +185,7 @@ class SlurmctldHA(ops.Object):
         try:
             call(rsync, *rsync_args)
         except CalledProcessError:
-            logger.exception("failed initial sync of %s to %s", source, target)
+            _logger.exception("failed initial sync of %s to %s", source, target)
             raise
 
         self._charm.slurmctld.service.stop()
@@ -193,7 +193,7 @@ class SlurmctldHA(ops.Object):
         try:
             call(rsync, *rsync_args)
         except CalledProcessError:
-            logger.exception("failed delta sync of %s to %s", source, target)
+            _logger.exception("failed delta sync of %s to %s", source, target)
             # Immediately restart slurmctld.service on failure
             self._charm.slurmctld.service.start()
             raise
