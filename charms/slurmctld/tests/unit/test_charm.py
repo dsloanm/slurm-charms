@@ -42,6 +42,26 @@ EXAMPLE_OCI_CONFIG = OCIConfig(
 )
 
 
+@pytest.fixture
+def peer_integration():
+    """Peer integration fixture."""
+    return testing.PeerRelation(
+        endpoint=PEER_INTEGRATION_NAME,
+        interface="slurmctld-peer",
+        local_app_data={"cluster_name": '"charmed-hpc"'},
+    )
+
+
+@pytest.fixture
+def smtp_relation():
+    """SMTP relation fixture."""
+    return testing.Relation(
+        endpoint=MAIL_INTEGRATION_NAME,
+        interface="smtp",
+        remote_app_name="smtp-integrator",
+    )
+
+
 @pytest.mark.parametrize(
     "leader",
     (
@@ -199,63 +219,37 @@ class TestSlurmctldCharm:
             )
 
     def test_on_smtp_relation_created_success(
-        self, mock_charm, mocker: MockerFixture, leader
+        self, mock_charm, mocker: MockerFixture, leader, smtp_relation, peer_integration
     ) -> None:
         """Test successful integration on the SMTP interface."""
         mock_add_package = mocker.patch.object(apt, "add_package")
-        smtp_relation = testing.Relation(
-            endpoint=MAIL_INTEGRATION_NAME,
-            interface="smtp",
-            id=1,
-            remote_app_name="smtp-integrator",
-        )
-        peer_integration = testing.PeerRelation(
-            endpoint=PEER_INTEGRATION_NAME,
-            interface="slurmctld-peer",
-            id=2,
-            local_app_data={"cluster_name": '"charmed-hpc"'},
-        )
 
         with mock_charm(
             mock_charm.on.relation_created(smtp_relation),
             testing.State(leader=leader, relations={smtp_relation, peer_integration}),
         ) as manager:
-            slurmctld = manager.charm.slurmctld
-            mocker.patch.object(slurmctld, "is_installed", return_value=True)
-            mocker.patch.object(slurmctld.service, "is_active", return_value=True)
-
+            mocker.patch.object(manager.charm.slurmctld, "is_installed", return_value=True)
+            mocker.patch.object(manager.charm.slurmctld.service, "is_active", return_value=True)
+            mocker.patch.object(manager.charm.slurmdbd, "is_ready", return_value=True)
             state = manager.run()
 
         mock_add_package.assert_called_once_with("slurm-mail")
         assert state.unit_status == testing.ActiveStatus()
 
     def test_on_smtp_relation_created_package_install_failure(
-        self, mock_charm, mocker: MockerFixture, leader
+        self, mock_charm, mocker: MockerFixture, leader, smtp_relation, peer_integration
     ) -> None:
         """Test integration on the SMTP interface when package installation fails."""
         mock_add_package = mocker.patch.object(apt, "add_package")
         mock_add_package.side_effect = apt.PackageError()
-        smtp_relation = testing.Relation(
-            endpoint=MAIL_INTEGRATION_NAME,
-            interface="smtp",
-            id=1,
-            remote_app_name="smtp-integrator",
-        )
-        peer_integration = testing.PeerRelation(
-            endpoint=PEER_INTEGRATION_NAME,
-            interface="slurmctld-peer",
-            id=2,
-            local_app_data={"cluster_name": '"charmed-hpc"'},
-        )
 
         with mock_charm(
             mock_charm.on.relation_created(smtp_relation),
             testing.State(leader=leader, relations={smtp_relation, peer_integration}),
         ) as manager:
-            slurmctld = manager.charm.slurmctld
-            mocker.patch.object(slurmctld, "is_installed", return_value=True)
-            mocker.patch.object(slurmctld.service, "is_active", return_value=True)
-
+            mocker.patch.object(manager.charm.slurmctld, "is_installed", return_value=True)
+            mocker.patch.object(manager.charm.slurmctld.service, "is_active", return_value=True)
+            mocker.patch.object(manager.charm.slurmdbd, "is_ready", return_value=True)
             state = manager.run()
 
         assert state.unit_status == testing.BlockedStatus(
@@ -263,70 +257,46 @@ class TestSlurmctldCharm:
         )
 
     def test_on_smtp_relation_broken_success(
-        self, mock_charm, mocker: MockerFixture, leader
+        self, mock_charm, mocker: MockerFixture, leader, smtp_relation, peer_integration
     ) -> None:
         """Test successful removal of integration on the SMTP interface."""
         mock_remove_package = mocker.patch.object(apt, "remove_package")
-        smtp_integration = testing.Relation(
-            endpoint=MAIL_INTEGRATION_NAME,
-            interface="smtp",
-            id=1,
-            remote_app_name="smtp-integrator",
-        )
-        peer_integration = testing.PeerRelation(
-            endpoint=PEER_INTEGRATION_NAME,
-            interface="slurmctld-peer",
-            id=2,
-            local_app_data={"cluster_name": '"charmed-hpc"'},
-        )
 
         with mock_charm(
-            mock_charm.on.relation_broken(smtp_integration),
-            testing.State(leader=leader, relations={smtp_integration, peer_integration}),
+            mock_charm.on.relation_broken(smtp_relation),
+            testing.State(leader=leader, relations={smtp_relation, peer_integration}),
         ) as manager:
-            slurmctld = manager.charm.slurmctld
-            mocker.patch.object(slurmctld, "is_installed", return_value=True)
-            mocker.patch.object(slurmctld.service, "is_active", return_value=True)
-
+            mocker.patch.object(manager.charm.slurmctld, "is_installed", return_value=True)
+            mocker.patch.object(manager.charm.slurmctld.service, "is_active", return_value=True)
+            mocker.patch.object(manager.charm.slurmdbd, "is_ready", return_value=True)
             state = manager.run()
 
         mock_remove_package.assert_called_once_with("slurm-mail")
         assert state.unit_status == testing.ActiveStatus()
 
     def test_on_smtp_relation_broken_failure(
-        self, mock_charm, mocker: MockerFixture, leader
+        self, mock_charm, mocker: MockerFixture, leader, smtp_relation, peer_integration
     ) -> None:
         """Test integration on the SMTP interface when package removal fails."""
         mock_remove_package = mocker.patch.object(apt, "remove_package")
         mock_remove_package.side_effect = apt.PackageError()
-        smtp_integration = testing.Relation(
-            endpoint=MAIL_INTEGRATION_NAME,
-            interface="smtp",
-            id=1,
-            remote_app_name="smtp-integrator",
-        )
-        peer_integration = testing.PeerRelation(
-            endpoint=PEER_INTEGRATION_NAME,
-            interface="slurmctld-peer",
-            id=2,
-            local_app_data={"cluster_name": '"charmed-hpc"'},
-        )
 
         with mock_charm(
-            mock_charm.on.relation_broken(smtp_integration),
-            testing.State(leader=leader, relations={smtp_integration, peer_integration}),
+            mock_charm.on.relation_broken(smtp_relation),
+            testing.State(leader=leader, relations={smtp_relation, peer_integration}),
         ) as manager:
-            slurmctld = manager.charm.slurmctld
-            mocker.patch.object(slurmctld, "is_installed", return_value=True)
-            mocker.patch.object(slurmctld.service, "is_active", return_value=True)
-
+            mocker.patch.object(manager.charm.slurmctld, "is_installed", return_value=True)
+            mocker.patch.object(manager.charm.slurmctld.service, "is_active", return_value=True)
+            mocker.patch.object(manager.charm.slurmdbd, "is_ready", return_value=True)
             state = manager.run()
 
         assert state.unit_status == testing.BlockedStatus(
             "failed to uninstall slurm-mail package. See `juju debug-log` for details"
         )
 
-    def test_on_smtp_data_available(self, mock_charm, mocker: MockerFixture, leader) -> None:
+    def test_on_smtp_data_available(
+        self, mock_charm, mocker: MockerFixture, leader, peer_integration
+    ) -> None:
         """Test update of SMTP data."""
         password = "password%1234"
         secret = testing.Secret({"password": password}, owner="app")
@@ -338,16 +308,12 @@ class TestSlurmctldCharm:
             "auth_type": "none",
             "transport_security": "starttls",
         }
+
         smtp_integration = testing.Relation(
             endpoint=MAIL_INTEGRATION_NAME,
             interface="smtp",
             remote_app_name="smtp-integrator",
             remote_app_data=smtp_data,
-        )
-        peer_integration = testing.PeerRelation(
-            endpoint=PEER_INTEGRATION_NAME,
-            interface="slurmctld-peer",
-            local_app_data={"cluster_name": '"charmed-hpc"'},
         )
 
         # Initial slurm-mail.conf
@@ -386,10 +352,9 @@ class TestSlurmctldCharm:
                 leader=leader, relations={smtp_integration, peer_integration}, secrets={secret}
             ),
         ) as manager:
-            slurmctld = manager.charm.slurmctld
-            mocker.patch.object(slurmctld, "is_installed", return_value=True)
-            mocker.patch.object(slurmctld.service, "is_active", return_value=True)
-
+            mocker.patch.object(manager.charm.slurmctld, "is_installed", return_value=True)
+            mocker.patch.object(manager.charm.slurmctld.service, "is_active", return_value=True)
+            mocker.patch.object(manager.charm.slurmdbd, "is_ready", return_value=True)
             state = manager.run()
 
         assert config_path.read_text().strip() == expected_config_content.strip()
