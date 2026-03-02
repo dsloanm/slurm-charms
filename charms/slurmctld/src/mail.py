@@ -71,8 +71,16 @@ def configure(**kwargs) -> Path:
     config.optionxform = str  # pyright: ignore[reportAttributeAccessIssue]
     config.read(config_path)
 
-    # Determine configuration changes
+    # Ensure the required section exists, reinitialize if not
     section = "slurm-send-mail"
+    if not config.has_section(section):
+        logger.warning(
+            "configuration file damaged: missing required section '%s'. reinitializing", section
+        )
+        _initialize_config_file(config_path)
+        config.read(config_path)
+
+    # Determine configuration changes
     config_changed = False
     for option, value in kwargs.items():
         if option not in supported_options:
@@ -85,13 +93,10 @@ def configure(**kwargs) -> Path:
         config_key, formatter = supported_options[option]
         new_value = formatter(value)
 
-        try:
-            # Fall back to the value `None` if the key does not exist
-            if config.get(section, config_key, fallback=None) != new_value:
-                config.set(section, config_key, new_value)
-                config_changed = True
-        except configparser.NoSectionError as e:
-            raise MailOpsError(f"configuration file missing required section: {section}") from e
+        # Fall back to the value `None` if the key does not exist
+        if config.get(section, config_key, fallback=None) != new_value:
+            config.set(section, config_key, new_value)
+            config_changed = True
 
     if not config_changed:
         logger.info("no changes required to slurm-mail configuration")
