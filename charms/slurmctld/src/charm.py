@@ -253,6 +253,10 @@ class SlurmctldCharm(ops.CharmBase):
     @reconfigure
     def _on_config_changed(self, _: ops.ConfigChangedEvent) -> None:
         """Update the `slurmctld` application's configuration."""
+        # Each unit maintains its own Slurm-Mail configuration, not just the leader.
+        # File coherence not a concern - Slurm-Mail can run with a stale slurm-mail.conf. It just
+        # briefly attempts to use an old SMTP config or an old `email-from-name` until hooks run to
+        # bring config in sync
         try:
             mail.configure(from_name=self.config["email-from-name"])
         except FileNotFoundError:
