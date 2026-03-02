@@ -194,7 +194,6 @@ class TestAptManager:
                 assert mock_add_package.call_args[0][0] == [
                     "slurmctld",
                     "libpmix-dev",
-                    "mailutils",
                     "prometheus-slurm-exporter",
                 ]
 
