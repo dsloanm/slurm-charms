@@ -546,6 +546,7 @@ class SlurmctldCharm(ops.CharmBase):
         logger.info("successfully updated state of node(s) %s to '%s'", nodes, state)
 
     @refresh
+    @wait_unless(database_ready)
     @block_unless(slurmctld_installed)
     def _on_smtp_relation_created(self, event: ops.RelationCreatedEvent) -> None:
         """Set up SMTP relation."""
@@ -566,6 +567,7 @@ class SlurmctldCharm(ops.CharmBase):
 
     @refresh
     @reconfigure
+    @wait_unless(database_ready)
     @block_unless(slurmctld_installed)
     def _on_smtp_data_available(self, event: SmtpDataAvailableEvent) -> None:
         """Apply new or changed SMTP data."""
