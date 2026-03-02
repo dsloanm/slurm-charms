@@ -23,10 +23,7 @@ from typing import cast
 import mail
 import ops
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
-from charms.smtp_integrator.v0.smtp import (
-    SmtpDataAvailableEvent,
-    SmtpRequires,
-)
+from charms.smtp_integrator.v0.smtp import SmtpDataAvailableEvent, SmtpRequires
 from config import (
     get_controllers,
     init_config,
@@ -554,7 +551,7 @@ class SlurmctldCharm(ops.CharmBase):
         """Set up SMTP relation."""
         message = "installing slurm-mail package"
         logger.info(message)
-        self.unit.status = ops.MaintenanceStatus(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
 
         try:
             mail.install()
@@ -574,7 +571,7 @@ class SlurmctldCharm(ops.CharmBase):
         """Apply new or changed SMTP data."""
         message = "configuring slurm-mail"
         logger.info(message)
-        self.unit.status = ops.MaintenanceStatus(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
 
         password = None
         if event.password_id:
@@ -622,7 +619,7 @@ class SlurmctldCharm(ops.CharmBase):
 
         message = "uninstalling slurm-mail package"
         logger.info(message)
-        self.unit.status = ops.MaintenanceStatus(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
 
         if self.unit.is_leader():
             with self.slurmctld.config.edit() as config:
