@@ -255,7 +255,7 @@ class SlurmctldCharm(ops.CharmBase):
         # briefly attempts to use an old SMTP config or an old `email-from-name` until hooks run to
         # bring config in sync
         if self.model.relations.get(MAIL_INTEGRATION_NAME):
-            mail.configure(from_name=self.config["email-from-name"])
+            mail.configure(from_name=str(self.config["email-from-name"]))
         else:
             logger.debug("smtp integration not connected. skipping mail configuration")
 
@@ -580,16 +580,18 @@ class SlurmctldCharm(ops.CharmBase):
             secret = self.model.get_secret(id=event.password_id)
             password = secret.get_content(refresh=True).get("password")
 
-        use_tls = event.transport_security in ("starttls", "tls")
+        use_tls = "no"
+        if event.transport_security in ("starttls", "tls"):
+            use_tls = "yes"
 
         try:
             mail_prog = mail.configure(
                 server=event.host,
-                port=event.port,
+                port=str(event.port),
                 use_tls=use_tls,
                 user=event.user,
                 password=password,
-                from_name=self.config["email-from-name"],
+                from_name=str(self.config["email-from-name"]),
             )
         except mail.MailOpsError as e:
             logger.error(e.message)

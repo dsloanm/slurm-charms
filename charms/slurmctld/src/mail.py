@@ -18,6 +18,7 @@ import configparser
 import logging
 import shutil
 from pathlib import Path
+from typing import Literal, Optional
 
 from constants import DEFAULT_SLURM_MAIL_CONFIG, MAILPROG_PATH, SLURM_MAIL_CONFIG_PATH
 from hpc_libs.machine import apt
@@ -34,17 +35,23 @@ class MailOpsError(Exception):
         return self.args[0]
 
 
-def configure(**kwargs) -> Path:
+def configure(
+    server: Optional[str] = None,
+    port: Optional[str] = None,
+    use_tls: Optional[Literal["yes", "no"]] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+    from_name: Optional[str] = None,
+) -> Path:
     """Configure slurm-mail and return the mailer executable path.
 
     Args:
-        **kwargs: Configuration parameters. Supported options:
-            server: hostname or IP address of the SMTP server.
-            port: port number for the SMTP server.
-            use_tls: enable/disable transport layer security (TLS) for the connection.
-            user: username for SMTP authentication
-            password: password for SMTP authentication
-            from_name: name to appear in the signature of sent emails.
+        server: hostname or IP address of the SMTP server.
+        port: port number for the SMTP server.
+        use_tls: "yes" to enable or "no" to disable transport layer security (TLS) for the connection.
+        user: username for SMTP authentication.
+        password: password for SMTP authentication.
+        from_name: name to appear in the signature of sent emails.
 
     Returns:
         Path to the executable to be assigned to `MailProg` in slurm.conf.
@@ -52,14 +59,13 @@ def configure(**kwargs) -> Path:
     Raises:
         MailOpsError: if an error occurs during configuration.
     """
-    # Option name and formatter
-    supported_options = {
-        "server": ("smtpServer", str),
-        "port": ("smtpPort", str),
-        "use_tls": ("smtpUseTls", lambda x: "yes" if x else "no"),
-        "user": ("smtpUserName", str),
-        "password": ("smtpPassword", str),
-        "from_name": ("emailFromName", str),
+    config_options = {
+        "smtpServer": server,
+        "smtpPort": port,
+        "smtpUseTls": use_tls,
+        "smtpUserName": user,
+        "smtpPassword": password,
+        "emailFromName": from_name,
     }
 
     config_path = Path(SLURM_MAIL_CONFIG_PATH)
@@ -82,16 +88,9 @@ def configure(**kwargs) -> Path:
 
     # Determine configuration changes
     config_changed = False
-    for option, value in kwargs.items():
-        if option not in supported_options:
-            _logger.warning("unknown configuration parameter: %s", option)
+    for config_key, new_value in config_options.items():
+        if new_value is None:
             continue
-
-        if value is None:
-            continue
-
-        config_key, formatter = supported_options[option]
-        new_value = formatter(value)
 
         # Fall back to the value `None` if the key does not exist
         if config.get(section, config_key, fallback=None) != new_value:
