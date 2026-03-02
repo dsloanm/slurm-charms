@@ -19,7 +19,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from constants import MAILPROG_PATH, SLURM_MAIL_CONFIG_PATH
+from constants import DEFAULT_SLURM_MAIL_CONFIG, MAILPROG_PATH, SLURM_MAIL_CONFIG_PATH
 from hpc_libs.machine import apt
 
 logger = logging.getLogger()
@@ -50,7 +50,6 @@ def configure(**kwargs) -> Path:
         Path to the executable to be assigned to `MailProg` in slurm.conf.
 
     Raises:
-        FileNotFoundError: if the configuration file does not exist.
         MailOpsError: if an error occurs during configuration.
     """
     # Option name and formatter
@@ -65,7 +64,7 @@ def configure(**kwargs) -> Path:
 
     config_path = Path(SLURM_MAIL_CONFIG_PATH)
     if not config_path.exists():
-        raise FileNotFoundError(f"configuration file not found: {config_path}")
+        _initialize_config_file(config_path)
 
     config = configparser.RawConfigParser()
     # Preserve camelCase keys, such as smtpServer
@@ -98,19 +97,7 @@ def configure(**kwargs) -> Path:
         logger.info("no changes required to slurm-mail configuration")
         return Path(MAILPROG_PATH)
 
-    # Write to temp file and automatically replace original
-    swap = config_path.with_stem("." + config_path.stem).with_suffix(config_path.suffix + ".swp")
-    with swap.open("w") as f:
-        config.write(f)
-
-    # Ensure slurm group has read access. Necessary for slurmctld to run MailProg=slurm-spool-mail
-    try:
-        swap.chmod(0o640)
-        shutil.chown(swap, "root", "slurm")
-    except OSError as e:
-        raise MailOpsError(f"failed to set permissions or ownership for {swap}") from e
-
-    swap.replace(config_path)
+    _write_config_file(config_path, config)
     return Path(MAILPROG_PATH)
 
 
@@ -120,6 +107,8 @@ def install() -> None:
     Raises:
         MailOpsError: if an error occurs during package installation.
     """
+    _initialize_config_file()
+
     try:
         apt.add_package("slurm-mail")
     except (apt.PackageNotFoundError, apt.PackageError) as e:
@@ -136,3 +125,63 @@ def uninstall() -> None:
         apt.remove_package("slurm-mail")
     except (apt.PackageNotFoundError, apt.PackageError) as e:
         raise MailOpsError(f"failed to uninstall slurm-mail package. reason: {e}") from e
+
+
+def _initialize_config_file(
+    config_path: Path = Path(SLURM_MAIL_CONFIG_PATH),
+    default_values: dict = DEFAULT_SLURM_MAIL_CONFIG,
+) -> None:
+    """Initialize the slurm-mail configuration file with default values if it does not exist.
+
+    Args:
+        config_path: configuration file path. Defaults to SLURM_MAIL_CONFIG_PATH.
+        default_values: default configuration values. Defaults to DEFAULT_SLURM_MAIL_CONFIG.
+
+    Raises:
+        MailOpsError: if an error occurs during configuration file initialization.
+    """
+    if config_path.exists():
+        logger.warning(
+            "configuration file already exists: %s. skipping initialization", config_path
+        )
+        return
+
+    logger.info("configuration file not found: %s. creating new configuration file", config_path)
+
+    default_config = configparser.RawConfigParser()
+    # Preserve camelCase keys, such as smtpServer
+    default_config.optionxform = str  # pyright: ignore[reportAttributeAccessIssue]
+    default_config.read_dict(default_values)
+    _write_config_file(config_path, default_config)
+
+
+def _write_config_file(config_path: Path, config: configparser.RawConfigParser) -> None:
+    """Write configuration to file with appropriate permissions and ownership.
+
+    Args:
+        config_path: configuration file path.
+        config: ConfigParser object to write to the file.
+
+    Raises:
+        MailOpsError: if an error occurs during file writing or setting of permissions.
+    """
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise MailOpsError(f"failed to create parent directories for {config_path}") from e
+
+    # Write to temp file and atomically replace original
+    swap = config_path.with_stem("." + config_path.stem).with_suffix(config_path.suffix + ".swp")
+
+    try:
+        with swap.open("w") as f:
+            config.write(f)
+
+        # Ensure slurm group has read access. Necessary for slurmctld to run MailProg=slurm-spool-mail
+        swap.chmod(0o640)
+        shutil.chown(swap, "root", "slurm")
+        swap.replace(config_path)
+    except OSError as e:
+        raise MailOpsError(
+            f"failed to write, set permissions, ownership, or atomically replace config file {config_path}"
+        ) from e

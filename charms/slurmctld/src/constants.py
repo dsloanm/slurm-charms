@@ -75,6 +75,37 @@ DEFAULT_SLURM_CONFIG = {
     "taskplugin": ["task/affinity"] if is_container() else ["task/cgroup", "task/affinity"],
     "include": [ACCOUNTING_CONFIG_FILE, PROFILING_CONFIG_FILE, OVERRIDES_CONFIG_FILE],
 }
+DEFAULT_SLURM_MAIL_CONFIG = {
+    "common": {"spoolDir": "/var/spool/slurm-mail"},
+    "slurm-spool-mail": {
+        "logFile": "/var/log/slurm-mail/slurm-spool-mail.log",
+        "verbose": "false",
+    },
+    "slurm-send-mail": {
+        "logFile": "/var/log/slurm-mail/slurm-send-mail.log",
+        "verbose": "false",
+        "arrayMaxNotifications": "0",
+        "emailFromUserAddress": "root",
+        "emailFromName": "Slurm Admin",
+        "emailRegEx": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "emailSubject": "Job $CLUSTER.$JOB_ID: $STATE",
+        "gecosNameField": "0",
+        "validateEmail": "false",
+        "datetimeFormat": "%d/%m/%Y %H:%M:%S",
+        "sacctExe": "/usr/bin/sacct",
+        "scontrolExe": "/usr/bin/scontrol",
+        "smtpServer": "localhost",
+        "smtpPort": "25",
+        "smtpUseTls": "no",
+        "smtpUseSsl": "no",
+        "smtpUserName": "",
+        "smtpPassword": "",
+        "retryOnFailure": "yes",
+        "retryDelay": "0",
+        "tailExe": "/usr/bin/tail",
+        "includeOutputLines": "0",
+    },
+}
 DEFAULT_PROFILING_CONFIG = {
     "acctgatherprofiletype": "acct_gather_profile/influxdb",
     "acctgatherinterconnecttype": "acct_gather_interconnect/sysfs",

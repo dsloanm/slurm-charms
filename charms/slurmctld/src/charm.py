@@ -257,10 +257,10 @@ class SlurmctldCharm(ops.CharmBase):
         # File coherence not a concern - Slurm-Mail can run with a stale slurm-mail.conf. It just
         # briefly attempts to use an old SMTP config or an old `email-from-name` until hooks run to
         # bring config in sync
-        try:
+        if self.model.relations.get(MAIL_INTEGRATION_NAME):
             mail.configure(from_name=self.config["email-from-name"])
-        except FileNotFoundError:
-            logger.debug("slurm-mail not installed. skipping mail configuration")
+        else:
+            logger.debug("smtp integration not connected. skipping mail configuration")
 
         # Only the leader handles configuration changes for the slurmctld service. Non-leader units
         # read configuration managed by the leader.
