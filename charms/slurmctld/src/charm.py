@@ -38,6 +38,7 @@ from constants import (
     DEFAULT_PROFILING_CONFIG,
     HA_MOUNT_INTEGRATION_NAME,
     MAIL_INTEGRATION_NAME,
+    MAILPROG_PATH,
     OCI_RUNTIME_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PROFILING_CONFIG_FILE,
@@ -255,7 +256,8 @@ class SlurmctldCharm(ops.CharmBase):
         # briefly attempts to use an old SMTP config or an old `email-from-name` until hooks run to
         # bring config in sync
         if self.model.relations.get(MAIL_INTEGRATION_NAME):
-            mail.configure(from_name=str(self.config["email-from-name"]))
+            with mail.configure() as config:
+                config.from_name = str(self.config["email-from-name"])
         else:
             logger.debug("smtp integration not connected. skipping mail configuration")
 
@@ -585,14 +587,13 @@ class SlurmctldCharm(ops.CharmBase):
             use_tls = "yes"
 
         try:
-            mail_prog = mail.configure(
-                server=event.host,
-                port=str(event.port),
-                use_tls=use_tls,
-                user=event.user,
-                password=password,
-                from_name=str(self.config["email-from-name"]),
-            )
+            with mail.configure() as config:
+                config.server = event.host
+                config.port = event.port
+                config.use_tls = use_tls
+                config.user = event.user
+                config.password = password
+                config.from_name = str(self.config["email-from-name"])
         except mail.MailOpsError as e:
             logger.error(e.message)
             event.defer()
@@ -604,7 +605,7 @@ class SlurmctldCharm(ops.CharmBase):
 
         if self.unit.is_leader():
             with self.slurmctld.config.edit() as config:
-                config.mail_prog = str(mail_prog)
+                config.mail_prog = str(MAILPROG_PATH)
 
     def _on_smtp_relation_departed(self, event: ops.RelationDepartedEvent) -> None:
         """Handle SMTP relation departing."""

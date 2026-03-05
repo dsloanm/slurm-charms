@@ -17,11 +17,14 @@
 import configparser
 import logging
 import shutil
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
-from constants import DEFAULT_SLURM_MAIL_CONFIG, MAILPROG_PATH, SLURM_MAIL_CONFIG_PATH
+from constants import DEFAULT_SLURM_MAIL_CONFIG, SLURM_MAIL_CONFIG_PATH
 from hpc_libs.machine import apt
+from pydantic import BaseModel, ConfigDict, Field
 
 _logger = logging.getLogger(__name__)
 
@@ -35,40 +38,65 @@ class MailOpsError(Exception):
         return self.args[0]
 
 
-def configure(
-    server: Optional[str] = None,
-    port: Optional[str] = None,
-    use_tls: Optional[Literal["yes", "no"]] = None,
-    user: Optional[str] = None,
-    password: Optional[str] = None,
-    from_name: Optional[str] = None,
-) -> Path:
-    """Configure slurm-mail and return the mailer executable path.
+class MailConfig(BaseModel):
+    """Mail configuration.
+
+    Attributes:
+        server: Hostname or IP address of the SMTP server.
+        port: Port number for the SMTP server.
+        use_tls: "yes" to enable or "no" to disable transport layer security (TLS).
+        user: Username for SMTP authentication.
+        password: Password for SMTP authentication.
+        from_name: Name to appear in the signature of sent emails.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    server: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    use_tls: Literal["yes", "no"] | None = None
+    user: str | None = None
+    password: str | None = Field(default=None, repr=False)
+    from_name: str | None = None
+
+
+@contextmanager
+def configure(config_path: Path = Path(SLURM_MAIL_CONFIG_PATH)) -> Generator[MailConfig]:
+    """Configure mail settings via a context manager.
+
+    Use as:
+        with configure() as config:
+            config.server = "smtp.example.com"
+            config.port = 587
+            config.use_tls = "yes"
+            config.user = "user"
+            config.password = "secret"
+            config.from_name = "The Charmed HPC Cluster Team"
+
+    See the `MailConfig` class for available configuration options.
 
     Args:
-        server: hostname or IP address of the SMTP server.
-        port: port number for the SMTP server.
-        use_tls: "yes" to enable or "no" to disable transport layer security (TLS) for the connection.
-        user: username for SMTP authentication.
-        password: password for SMTP authentication.
-        from_name: name to appear in the signature of sent emails.
+        config_path: Configuration file path. Defaults to `SLURM_MAIL_CONFIG_PATH`.
 
     Returns:
-        Path to the executable to be assigned to `MailProg` in slurm.conf.
+        `MailConfig` instance to be updated within the context.
 
     Raises:
         MailOpsError: if an error occurs during configuration.
     """
+    config_model = MailConfig()
+    yield config_model
+
+    # Match model fields to slurm-mail.conf keys
     config_options = {
-        "smtpServer": server,
-        "smtpPort": port,
-        "smtpUseTls": use_tls,
-        "smtpUserName": user,
-        "smtpPassword": password,
-        "emailFromName": from_name,
+        "smtpServer": config_model.server,
+        "smtpPort": str(config_model.port) if config_model.port else None,
+        "smtpUseTls": config_model.use_tls,
+        "smtpUserName": config_model.user,
+        "smtpPassword": config_model.password,
+        "emailFromName": config_model.from_name,
     }
 
-    config_path = Path(SLURM_MAIL_CONFIG_PATH)
     if not config_path.exists():
         _initialize_config_file(config_path)
 
@@ -99,10 +127,8 @@ def configure(
 
     if not config_changed:
         _logger.info("no changes required to slurm-mail configuration")
-        return Path(MAILPROG_PATH)
-
+        return
     _write_config_file(config_path, config)
-    return Path(MAILPROG_PATH)
 
 
 def install() -> None:
