@@ -257,7 +257,7 @@ class SlurmctldCharm(ops.CharmBase):
         # bring config in sync
         if self.model.relations.get(MAIL_INTEGRATION_NAME):
             with mail.configure() as config:
-                config.from_name = str(self.config["email-from-name"])
+                config.from_name = cast(str, self.config["email-from-name"])
         else:
             logger.debug("smtp integration not connected. skipping mail configuration")
 
@@ -593,7 +593,7 @@ class SlurmctldCharm(ops.CharmBase):
                 config.use_tls = use_tls
                 config.user = event.user
                 config.password = password
-                config.from_name = str(self.config["email-from-name"])
+                config.from_name = cast(str, self.config["email-from-name"])
         except mail.MailOpsError as e:
             logger.error(e.message)
             event.defer()
