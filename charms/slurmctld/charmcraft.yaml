@@ -111,7 +111,11 @@ config:
     email-from-name:
       default: "Charmed HPC Admin"
       type: string
-      description: Name to appear in the signature of email notifications sent by Slurm.
+      description: |
+        Name to appear in the signature of email notifications sent by Slurm.
+
+        Corresponds to the `emailFromName` parameter used in the Slurm-Mail project. See:
+        https://github.com/neilmunday/slurm-mail/blob/v4.31/etc/slurm-mail/slurm-mail.conf#L16
 
 actions:
   show-current-config:
