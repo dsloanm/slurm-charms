@@ -73,16 +73,16 @@ def configure(config_path: Path = Path(SLURM_MAIL_CONFIG_PATH)) -> Generator[Mai
             config.password = "secret"
             config.from_name = "The Charmed HPC Cluster Team"
 
-    See the `MailConfig` class for available configuration options.
+    See the MailConfig class for available configuration options.
 
     Args:
-        config_path: Configuration file path. Defaults to `SLURM_MAIL_CONFIG_PATH`.
+        config_path: Configuration file path. Defaults to SLURM_MAIL_CONFIG_PATH.
 
     Returns:
-        `MailConfig` instance to be updated within the context.
+        MailConfig instance to be updated within the context.
 
     Raises:
-        MailOpsError: if an error occurs during configuration.
+        MailOpsError: If an error occurs during configuration.
     """
     config_model = MailConfig()
     yield config_model
@@ -135,26 +135,26 @@ def install() -> None:
     """Ensure slurm-mail package is installed.
 
     Raises:
-        MailOpsError: if an error occurs during package installation.
+        MailOpsError: If an error occurs during package installation.
     """
     _initialize_config_file()
 
     try:
         apt.add_package("slurm-mail")
     except (apt.PackageNotFoundError, apt.PackageError) as e:
-        raise MailOpsError(f"failed to install slurm-mail package. reason: {e}") from e
+        raise MailOpsError(f"Failed to install slurm-mail package. Reason: {e}") from e
 
 
 def uninstall() -> None:
     """Ensure slurm-mail package is uninstalled.
 
     Raises:
-        MailOpsError: if an error occurs during package removal.
+        MailOpsError: If an error occurs during package removal.
     """
     try:
         apt.remove_package("slurm-mail")
     except (apt.PackageNotFoundError, apt.PackageError) as e:
-        raise MailOpsError(f"failed to uninstall slurm-mail package. reason: {e}") from e
+        raise MailOpsError(f"Failed to uninstall slurm-mail package. Reason: {e}") from e
 
 
 def _initialize_config_file(
@@ -164,19 +164,19 @@ def _initialize_config_file(
     """Initialize the slurm-mail configuration file with default values if it does not exist.
 
     Args:
-        config_path: configuration file path. Defaults to SLURM_MAIL_CONFIG_PATH.
-        default_values: default configuration values. Defaults to DEFAULT_SLURM_MAIL_CONFIG.
+        config_path: Configuration file path. Defaults to SLURM_MAIL_CONFIG_PATH.
+        default_values: Default configuration values. Defaults to DEFAULT_SLURM_MAIL_CONFIG.
 
     Raises:
-        MailOpsError: if an error occurs during configuration file initialization.
+        MailOpsError: If an error occurs during configuration file initialization.
     """
     if config_path.exists():
         _logger.warning(
-            "configuration file already exists: %s. skipping initialization", config_path
+            "Configuration file already exists: %s. Skipping initialization", config_path
         )
         return
 
-    _logger.info("configuration file not found: %s. creating new configuration file", config_path)
+    _logger.info("Configuration file not found: %s. Creating new configuration file", config_path)
 
     default_config = configparser.RawConfigParser()
     # Preserve camelCase keys, such as smtpServer
@@ -189,16 +189,16 @@ def _write_config_file(config_path: Path, config: configparser.RawConfigParser) 
     """Write configuration to file with appropriate permissions and ownership.
 
     Args:
-        config_path: configuration file path.
+        config_path: Configuration file path.
         config: ConfigParser object to write to the file.
 
     Raises:
-        MailOpsError: if an error occurs during file writing or setting of permissions.
+        MailOpsError: If an error occurs during file writing or setting of permissions.
     """
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise MailOpsError(f"failed to create parent directories for {config_path}") from e
+        raise MailOpsError(f"Failed to create parent directories for {config_path}") from e
 
     # Write to temp file and atomically replace original
     swap = config_path.with_stem("." + config_path.stem).with_suffix(config_path.suffix + ".swp")
@@ -213,5 +213,5 @@ def _write_config_file(config_path: Path, config: configparser.RawConfigParser) 
         swap.replace(config_path)
     except OSError as e:
         raise MailOpsError(
-            f"failed to write, set permissions, ownership, or atomically replace config file {config_path}"
+            f"Failed to write, set permissions, ownership, or atomically replace config file {config_path}"
         ) from e

@@ -599,7 +599,7 @@ class SlurmctldCharm(ops.CharmBase):
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(
-                    "failed to configure slurm-mail. See `juju debug-log` for details"
+                    "Failed to configure slurm-mail. See `juju debug-log` for details"
                 )
             )
 
