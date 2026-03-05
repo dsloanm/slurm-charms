@@ -74,7 +74,7 @@ def configure() -> Generator[MailConfig]:
     Args:
         config_path: Configuration file path. Defaults to SLURM_MAIL_CONFIG_PATH.
 
-    Returns:
+    Yields:
         MailConfig instance to be updated within the context.
 
     Raises:
