@@ -61,7 +61,7 @@ class MailConfig(BaseModel):
 
 
 @contextmanager
-def configure(config_path: Path = Path(SLURM_MAIL_CONFIG_PATH)) -> Generator[MailConfig]:
+def configure() -> Generator[MailConfig]:
     """Configure mail settings via a context manager.
 
     Use as:
@@ -97,6 +97,7 @@ def configure(config_path: Path = Path(SLURM_MAIL_CONFIG_PATH)) -> Generator[Mai
         "emailFromName": config_model.from_name,
     }
 
+    config_path = Path(SLURM_MAIL_CONFIG_PATH)
     if not config_path.exists():
         _initialize_config_file(config_path)
 
@@ -137,12 +138,12 @@ def install() -> None:
     Raises:
         MailOpsError: If an error occurs during package installation.
     """
-    _initialize_config_file()
-
     try:
         apt.add_package("slurm-mail")
     except (apt.PackageNotFoundError, apt.PackageError) as e:
         raise MailOpsError(f"Failed to install slurm-mail package. Reason: {e}") from e
+
+    _initialize_config_file()
 
 
 def uninstall() -> None:
