@@ -563,7 +563,7 @@ class SlurmctldCharm(ops.CharmBase):
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(
-                    "failed to install slurm-mail package. See `juju debug-log` for details"
+                    "Failed to install slurm-mail package. See `juju debug-log` for details"
                 )
             )
 
@@ -637,7 +637,7 @@ class SlurmctldCharm(ops.CharmBase):
             logger.error(e.message)
             raise StopCharm(
                 ops.BlockedStatus(
-                    "failed to uninstall slurm-mail package. See `juju debug-log` for details"
+                    "Failed to uninstall slurm-mail package. See `juju debug-log` for details"
                 )
             )
 

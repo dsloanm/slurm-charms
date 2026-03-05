@@ -253,7 +253,7 @@ class TestSlurmctldCharm:
             state = manager.run()
 
         assert state.unit_status == testing.BlockedStatus(
-            "failed to install slurm-mail package. See `juju debug-log` for details"
+            "Failed to install slurm-mail package. See `juju debug-log` for details"
         )
 
     def test_on_smtp_relation_broken_success(
@@ -291,7 +291,7 @@ class TestSlurmctldCharm:
             state = manager.run()
 
         assert state.unit_status == testing.BlockedStatus(
-            "failed to uninstall slurm-mail package. See `juju debug-log` for details"
+            "Failed to uninstall slurm-mail package. See `juju debug-log` for details"
         )
 
     def test_on_smtp_data_available(
