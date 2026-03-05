@@ -23,19 +23,15 @@ from pathlib import Path
 from typing import Literal
 
 from constants import DEFAULT_SLURM_MAIL_CONFIG, SLURM_MAIL_CONFIG_PATH
+from hpc_libs.errors import Error
 from hpc_libs.machine import apt
 from pydantic import BaseModel, ConfigDict, Field
 
 _logger = logging.getLogger(__name__)
 
 
-class MailOpsError(Exception):
+class MailOpsError(Error):
     """Exception raised when mail service operations fail."""
-
-    @property
-    def message(self) -> str:
-        """Return the error message passed as argument to the exception."""
-        return self.args[0]
 
 
 class MailConfig(BaseModel):
