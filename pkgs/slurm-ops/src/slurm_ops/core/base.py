@@ -237,7 +237,7 @@ class _AptManager(OpsManager):
             case "sackd":
                 packages.extend(["slurm-client"])
             case "slurmctld":
-                packages.extend(["libpmix-dev", "mailutils"])
+                packages.extend(["libpmix-dev"])
             case "slurmd":
                 packages.extend(["slurm-client", "libpmix-dev", "openmpi-bin"])
             case "slurmrestd":

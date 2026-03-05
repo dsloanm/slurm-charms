@@ -23,7 +23,7 @@ from ops import (
 if TYPE_CHECKING:
     from charm import SlurmctldCharm
 
-logger = logging.getLogger()
+_logger = logging.getLogger(__name__)
 
 
 class InfluxDBAvailableEvent(EventBase):
@@ -104,10 +104,10 @@ class InfluxDB(Object):
     def _on_relation_joined(self, event: RelationJoinedEvent) -> None:
         """Store influxdb_ingress in the charm."""
         if self.framework.model.unit.is_leader():
-            logger.debug("Slurmctld Leader influxdb._on_relation_joined()")
+            _logger.debug("Slurmctld Leader influxdb._on_relation_joined()")
 
             if (app_data := event.relation.data.get(self.model.app)) is not None:
-                logger.debug(f"Influxdb interface app data: {app_data}")
+                _logger.debug(f"Influxdb interface app data: {app_data}")
 
                 influxdb_admin_info = app_data.get("influxdb_admin_info", "")
 
@@ -115,7 +115,7 @@ class InfluxDB(Object):
                     return
 
                 if unit := event.unit:
-                    logger.debug(f"Influxdb unit: {unit}")
+                    _logger.debug(f"Influxdb unit: {unit}")
                     if (unit_data := event.relation.data.get(unit)) is not None:
                         admin_info = {"host": "", "port": "", "user": "", "password": ""}
                         if host := unit_data.get("ingress-address"):
@@ -143,9 +143,9 @@ class InfluxDB(Object):
 
                             # Only create the user and db if they don't already exist
                             users = [db["user"] for db in client.get_list_users()]
-                            logger.debug(f"## users in influxdb: {users}")
+                            _logger.debug(f"## users in influxdb: {users}")
                             if self._INFLUX_USER not in users:
-                                logger.debug(f"## Creating influxdb user: {self._INFLUX_USER}")
+                                _logger.debug(f"## Creating influxdb user: {self._INFLUX_USER}")
                                 client.create_user(self._INFLUX_USER, influx_slurm_password)
 
                             databases = [db["name"] for db in client.get_list_database()]
@@ -153,7 +153,7 @@ class InfluxDB(Object):
                             database_name = data.cluster_name if data else ""
 
                             if database_name not in databases:
-                                logger.debug(f"## Creating influxdb db: {database_name}")
+                                _logger.debug(f"## Creating influxdb db: {database_name}")
                                 client.create_database(database_name)
 
                             client.grant_privilege(
@@ -166,7 +166,7 @@ class InfluxDB(Object):
                             ]
                             if self._INFLUX_POLICY_NAME not in policies:
                                 # Create the default retention policy
-                                logger.debug(
+                                _logger.debug(
                                     f"## Creating influxdb retention policy: {self._INFLUX_POLICY_NAME}"
                                 )
                                 client.create_retention_policy(
@@ -187,19 +187,19 @@ class InfluxDB(Object):
                             )
 
                         else:
-                            logger.debug("Influxdb admin connection info incomplete.")
+                            _logger.debug("Influxdb admin connection info incomplete.")
                             event.defer()
                     else:
-                        logger.debug("No unit_data available in the event.")
+                        _logger.debug("No unit_data available in the event.")
                         event.defer()
                 else:
-                    logger.debug("No units in the event.")
+                    _logger.debug("No units in the event.")
                     event.defer()
             else:
-                logger.debug("Application not available on the relation.")
+                _logger.debug("Application not available on the relation.")
                 event.defer()
         else:
-            logger.debug("Slurmctld unit not leader - skipping hook event.")
+            _logger.debug("Slurmctld unit not leader - skipping hook event.")
 
         return
 
@@ -207,7 +207,7 @@ class InfluxDB(Object):
         """Remove the database and user from influxdb on relation-broken."""
         if self.framework.model.unit.is_leader():
             if (app_data := event.relation.data.get(self.model.app)) is not None:
-                logger.debug(f"Infulxdb interface app data: {app_data}")
+                _logger.debug(f"Infulxdb interface app data: {app_data}")
 
                 influxdb_admin_info = app_data.get("influxdb_admin_info", "")
 
@@ -241,16 +241,16 @@ class InfluxDB(Object):
                                 self._INFLUX_POLICY_NAME, database=database_name
                             )
                     except InfluxDBClientError as e:
-                        logger.debug(e)
+                        _logger.debug(e)
                     except requests.exceptions.ConnectionError as e:
-                        logger.debug(e)
+                        _logger.debug(e)
 
                     app_data["influxdb_admin_info"] = ""
                     self._on.influxdb_unavailable.emit()
 
                 else:
-                    logger.debug("No influxdb admin info available.")
+                    _logger.debug("No influxdb admin info available.")
             else:
-                logger.debug("No app_data available.")
+                _logger.debug("No app_data available.")
         else:
-            logger.debug("Slurmctld unit not leader - skipping hook event.")
+            _logger.debug("Slurmctld unit not leader - skipping hook event.")

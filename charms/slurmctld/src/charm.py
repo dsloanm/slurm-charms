@@ -20,8 +20,10 @@ import logging
 import secrets
 from typing import cast
 
+import mail
 import ops
 from charms.grafana_agent.v0.cos_agent import COSAgentProvider
+from charms.smtp_integrator.v0.smtp import SmtpDataAvailableEvent, SmtpRequires
 from config import (
     get_controllers,
     init_config,
@@ -35,6 +37,8 @@ from constants import (
     CLUSTER_NAME_PREFIX,
     DEFAULT_PROFILING_CONFIG,
     HA_MOUNT_INTEGRATION_NAME,
+    MAIL_INTEGRATION_NAME,
+    MAILPROG_PATH,
     OCI_RUNTIME_INTEGRATION_NAME,
     PEER_INTEGRATION_NAME,
     PROFILING_CONFIG_FILE,
@@ -99,8 +103,13 @@ refresh.__doc__ = """Refresh status of the `slurmctld` unit after an event handl
 class SlurmctldCharm(ops.CharmBase):
     """Charmed operator for `slurmctld`, Slurm's controller service."""
 
+    _stored = ops.StoredState()
+
     def __init__(self, framework: ops.Framework) -> None:
         super().__init__(framework)
+
+        # Required to track if this unit is departing during relation broken events
+        self._stored.set_default(unit_departing=False)
 
         self.slurmctld = SlurmctldManager(snap=False)
         framework.observe(self.on.install, self._on_install)
@@ -146,6 +155,18 @@ class SlurmctldCharm(ops.CharmBase):
         framework.observe(
             self.oci_runtime.on.oci_runtime_disconnected,
             self._on_oci_runtime_disconnected,
+        )
+
+        self._smtp = SmtpRequires(self)
+        framework.observe(
+            self.on[MAIL_INTEGRATION_NAME].relation_created, self._on_smtp_relation_created
+        )
+        framework.observe(self._smtp.on.smtp_data_available, self._on_smtp_data_available)
+        framework.observe(
+            self.on[MAIL_INTEGRATION_NAME].relation_departed, self._on_smtp_relation_departed
+        )
+        framework.observe(
+            self.on[MAIL_INTEGRATION_NAME].relation_broken, self._on_smtp_relation_broken
         )
 
         self._opentelemetry_collector = COSAgentProvider(
@@ -226,19 +247,26 @@ class SlurmctldCharm(ops.CharmBase):
                 ops.BlockedStatus("Failed to start `slurmctld`. See `juju debug-log` for details")
             )
 
-    @leader
     @refresh
     @reconfigure
     def _on_config_changed(self, _: ops.ConfigChangedEvent) -> None:
-        """Update the `slurmctld` application's configuration.
+        """Update the `slurmctld` application's configuration."""
+        # Each unit maintains its own Slurm-Mail configuration, not just the leader.
+        # File coherence not a concern - Slurm-Mail can run with a stale slurm-mail.conf. It just
+        # briefly attempts to use an old SMTP config or an old `email-from-name` until hooks run to
+        # bring config in sync
+        if self.model.relations.get(MAIL_INTEGRATION_NAME):
+            with mail.configure() as config:
+                config.from_name = cast(str, self.config["email-from-name"])
+        else:
+            logger.debug("smtp integration not connected. skipping mail configuration")
 
-        Notes:
-            - Only the `slurmctld` application leader should handle configuration changes. The
-              non-leader units should only read configuration managed by the leader.
-        """
-        update_cgroup_config(self)
-        update_default_partition(self)
-        update_overrides(self)
+        # Only the leader handles configuration changes for the slurmctld service. Non-leader units
+        # read configuration managed by the leader.
+        if self.unit.is_leader():
+            update_cgroup_config(self)
+            update_default_partition(self)
+            update_overrides(self)
 
     @refresh
     def _on_update_status(self, _: ops.UpdateStatusEvent) -> None:
@@ -518,6 +546,100 @@ class SlurmctldCharm(ops.CharmBase):
             event.fail(err.capitalize())
 
         logger.info("successfully updated state of node(s) %s to '%s'", nodes, state)
+
+    @refresh
+    @wait_unless(database_ready)
+    @block_unless(slurmctld_installed)
+    def _on_smtp_relation_created(self, event: ops.RelationCreatedEvent) -> None:
+        """Set up SMTP relation."""
+        message = "installing slurm-mail package"
+        logger.info(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
+
+        try:
+            mail.install()
+        except mail.MailOpsError as e:
+            logger.error(e.message)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to install slurm-mail package. See `juju debug-log` for details"
+                )
+            )
+
+    @refresh
+    @reconfigure
+    @wait_unless(database_ready)
+    @block_unless(slurmctld_installed)
+    def _on_smtp_data_available(self, event: SmtpDataAvailableEvent) -> None:
+        """Apply new or changed SMTP data."""
+        message = "configuring slurm-mail"
+        logger.info(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
+
+        password = None
+        if event.password_id:
+            secret = self.model.get_secret(id=event.password_id)
+            password = secret.get_content(refresh=True).get("password")
+
+        use_tls = "no"
+        if event.transport_security in ("starttls", "tls"):
+            use_tls = "yes"
+
+        try:
+            with mail.configure() as config:
+                config.server = event.host
+                config.port = event.port
+                config.use_tls = use_tls
+                config.user = event.user
+                config.password = password
+                config.from_name = cast(str, self.config["email-from-name"])
+        except mail.MailOpsError as e:
+            logger.error(e.message)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to configure slurm-mail. See `juju debug-log` for details"
+                )
+            )
+
+        if self.unit.is_leader():
+            with self.slurmctld.config.edit() as config:
+                config.mail_prog = str(MAILPROG_PATH)
+
+    def _on_smtp_relation_departed(self, event: ops.RelationDepartedEvent) -> None:
+        """Handle SMTP relation departing."""
+        if event.departing_unit == self.unit:
+            self._stored.unit_departing = True
+
+    @refresh
+    @reconfigure
+    @block_unless(slurmctld_installed)
+    def _on_smtp_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
+        """Clean up on SMTP relation breaking."""
+        if self._stored.unit_departing:
+            # Do not remove config if broken event is due to slurmctld being scaled down rather than
+            # the relation or application being removed
+            return
+
+        message = "uninstalling slurm-mail package"
+        logger.info(message)
+        self.unit.status = ops.MaintenanceStatus(message.capitalize())
+
+        if self.unit.is_leader():
+            with self.slurmctld.config.edit() as config:
+                if config.mail_prog:
+                    del config.mail_prog
+
+        try:
+            mail.uninstall()
+        except mail.MailOpsError as e:
+            logger.error(e.message)
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to uninstall slurm-mail package. See `juju debug-log` for details"
+                )
+            )
 
     def _merge_controller_data(self, app: SackdRequirer | SlurmdRequirer, new_endpoints) -> None:
         """Merge new controller endpoints with existing controller data."""
