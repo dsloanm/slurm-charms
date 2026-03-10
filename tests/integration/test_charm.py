@@ -169,17 +169,36 @@ def test_set_node_config_action(juju: jubilant.Juju) -> None:
     logger.info("testing that we can update the configuration of a single compute node")
     juju.run(slurmd_unit, "set-node-config", params={"parameters": "weight=100"})
     # Check that the weight of the compute node is 100.
-    result = json.loads(juju.exec(f"scontrol --json show node {name}", unit=slurmd_unit).stdout)
-    assert result["nodes"][0]["weight"] == 100
-    assert "DOWN" in result["nodes"][0]["state"]
-    assert result["nodes"][0]["reason"] == "'n/a'"
+    # Retry on failure as it may take a moment for scontrol output to update
+    attempts = tenacity.Retrying(
+        wait=tenacity.wait.wait_exponential(multiplier=2),
+        stop=tenacity.stop_after_attempt(3),
+        reraise=True,
+    )
+    for attempt in attempts:
+        with attempt:
+            result = json.loads(
+                juju.exec(f"scontrol --json show node {name}", unit=slurmd_unit).stdout
+            )
+            assert result["nodes"][0]["weight"] == 100
+            assert "DOWN" in result["nodes"][0]["state"]
+            assert result["nodes"][0]["reason"] == "'n/a'"
 
     # Reset compute node to its default configuration.
     juju.run(slurmd_unit, "set-node-config", params={"reset": True})
-    result = json.loads(juju.exec(f"scontrol --json show node {name}", unit=slurmd_unit).stdout)
-    assert result["nodes"][0]["weight"] == 1
-    assert "DOWN" in result["nodes"][0]["state"]
-    assert result["nodes"][0]["reason"] == "'n/a'"
+    attempts = tenacity.Retrying(
+        wait=tenacity.wait.wait_exponential(multiplier=2),
+        stop=tenacity.stop_after_attempt(3),
+        reraise=True,
+    )
+    for attempt in attempts:
+        with attempt:
+            result = json.loads(
+                juju.exec(f"scontrol --json show node {name}", unit=slurmd_unit).stdout
+            )
+            assert result["nodes"][0]["weight"] == 1
+            assert "DOWN" in result["nodes"][0]["state"]
+            assert result["nodes"][0]["reason"] == "'n/a'"
 
 
 @pytest.mark.order(9)
