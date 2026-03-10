@@ -64,7 +64,10 @@ def test_apptainer_oci_scheduling(juju: jubilant.Juju) -> None:
     slurmd_unit = f"{SLURMD_APP_NAME}/0"
 
     logger.info("testing that '%s' is running jobs within OCI images", APPTAINER_APP_NAME)
-    juju.exec("apptainer pull /tmp/jammy.sif docker://ubuntu:jammy", unit=slurmd_unit)
+    juju.exec(
+        "apptainer pull /tmp/jammy.sif docker://ghcr.io/charmed-hpc/ubuntu-test:jammy",
+        unit=slurmd_unit,
+    )
     result = juju.exec(
         f"cd /tmp; srun -p {SLURMD_APP_NAME} --container=/tmp/jammy.sif cat /etc/os-release",
         unit=sackd_unit,
