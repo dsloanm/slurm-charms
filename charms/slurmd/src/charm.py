@@ -17,6 +17,7 @@
 """Charmed operator for `slurmd`, Slurm's compute node service."""
 
 import logging
+from subprocess import CalledProcessError
 
 import gpu
 import ops
@@ -26,6 +27,7 @@ from config import ConfigManager
 from constants import SLURMD_INTEGRATION_NAME, SLURMD_PORT
 from hpc_libs.errors import SystemdError
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     ComputeData,
     SlurmctldConnectedEvent,
     SlurmctldDisconnectedEvent,
@@ -35,6 +37,7 @@ from hpc_libs.interfaces import (
     controller_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, refresh
 from pydantic import ValidationError
 from slurm_ops import SlurmdManager, SlurmOpsError
@@ -73,6 +76,7 @@ class SlurmdCharm(ops.CharmBase):
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.config_changed, self._on_config_changed)
         framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.secret_changed, self._on_secret_changed)
         framework.observe(self.on.set_node_config_action, self._on_set_node_config_action)
 
         self.slurmctld = SlurmdProvider(self, SLURMD_INTEGRATION_NAME)
@@ -157,7 +161,7 @@ class SlurmdCharm(ops.CharmBase):
         """Handle when controller data is ready from the `slurmctld` application."""
         data = self.slurmctld.get_controller_data(event.relation.id)
 
-        self.slurmd.key.set(data.auth_key)
+        self.slurmd.key.set(data.auth_key, data.auth_key_content_id)
         self.slurmd.conf_server = data.controllers
 
         # Set default state and reason if this compute node is being added to a Slurm cluster.
@@ -193,6 +197,42 @@ class SlurmdCharm(ops.CharmBase):
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus("Failed to stop `slurmd`. See `juju debug-log` for details")
+            )
+
+    @refresh
+    @block_unless(slurmd_installed)
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Handle when a secret is changed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' changed. ignoring", event.secret.label)
+            return
+
+        content = event.secret.get_content(refresh=True)
+        auth_key = content.get("key")
+        auth_key_id = content.get("keyid")
+        if not auth_key or not auth_key_id:
+            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+                )
+            )
+
+        self.slurmd.key.set(auth_key, auth_key_id)
+
+        # Necessary to load new key from file into the service
+        # TODO: replace with self.service.reload()
+        slurm_service = "slurmd.service"
+        try:
+            call("/usr/bin/systemctl", "reload", slurm_service)
+        except CalledProcessError as e:
+            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
+                )
             )
 
     @refresh

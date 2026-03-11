@@ -20,6 +20,8 @@ __all__ = [
 ]
 
 import base64
+import datetime
+import json
 import logging
 import secrets
 import shutil
@@ -501,33 +503,97 @@ class _JWTSecretManager(SecretManager):
         return self._file
 
 
-class _SlurmSecretManager(SecretManager):
-    """Manage the `slurm.key` secret file."""
+class _SlurmSecretManager:
+    """Manage the `slurm.jwks` key file."""
 
     def __init__(self, ops_manager: OpsManager, /, user: str, group: str) -> None:
-        self._file = ops_manager.etc_path / "slurm.key"
+        self._file = ops_manager.etc_path / "slurm.jwks"
         self._user = user
         self._group = group
 
-    def get(self) -> str:
-        """Get the contents of the current `slurm.key` secret file."""
-        return base64.b64encode(self._file.read_bytes()).decode()
+    def generate(self) -> str:
+        """Generate a cryptographically secure `slurm.jwks` key."""
+        key = base64.b64encode(secrets.token_bytes(2048)).decode()
+        return key
 
-    def set(self, secret: str) -> None:
-        """Set the contents of the `slurm.key` secret file."""
-        self._file.write_bytes(base64.b64decode(secret.encode()))
-        self._file.chmod(0o600)
-        shutil.chown(self._file, self._user, self._group)
+    def add(self, key: str, key_id: str) -> None:
+        """Append given key to the `slurm.jwks` key file."""
+        data = self._read_jwks()
+        new_entry = self._get_new_entry(key, key_id)
+        data["keys"].append(new_entry)
+        self._write_jwks(data)
 
-    def generate(self) -> None:
-        """Generate a new, cryptographically secure `slurm.key` secret."""
-        key = secrets.token_bytes(2048)
-        self.set(base64.b64encode(key).decode())
+        _log_security_event(
+            "INFO",
+            "authn_token_created",
+            "slurm-auth",
+            f"New Slurm authentication key added with key ID: {key_id}",
+        )
+
+    def keep_latest_key(self) -> None:
+        """Preserve the most recently added key in the `slurm.jwks` key file and remove all others."""
+        data = self._read_jwks()
+        if not data["keys"]:
+            raise SlurmOpsError("No keys found in slurm.jwks")
+
+        # Most recently added key is last in list
+        last_entry = data["keys"][-1]
+        removed_key_ids = [entry["kid"] for entry in data["keys"][:-1]]
+        self._write_jwks({"keys": [last_entry]})
+
+        _log_security_event(
+            "INFO",
+            "authn_token_deleted",
+            "slurm-auth",
+            f"Deleted Slurm authentication key IDs: {removed_key_ids}. Current key ID: {last_entry['kid']}",
+        )
+
+    def set(self, key: str, key_id: str) -> None:
+        """Set the `slurm.jwks` key file to contain only the given key."""
+        new_entry = self._get_new_entry(key, key_id)
+        self._write_jwks({"keys": [new_entry]})
+
+        _log_security_event(
+            "INFO",
+            "authn_token_created",
+            "slurm-auth",
+            f"Slurm authentication key set with key ID: {key_id}",
+        )
 
     @property
     def path(self) -> Path:
-        """Get the path to the `slurm.key` secret file."""
+        """Get the path to the `slurm.jwks` secret file."""
         return self._file
+
+    @staticmethod
+    def _get_new_entry(key: str, key_id: str) -> dict[str, str]:
+        """Get a new key entry for the `slurm.jwks` key file.
+
+        Format of the key entry is defined in Slurm documentation:
+        https://slurm.schedmd.com/authentication.html#multiple_key_setup
+        """
+        if not key:
+            raise ValueError("Empty key provided")
+        if not key_id:
+            raise ValueError("Empty key ID provided")
+        return {
+            "alg": "HS256",
+            "kty": "oct",
+            "kid": key_id,
+            "k": key,
+        }
+
+    def _read_jwks(self) -> dict[str, list[dict[str, str]]]:
+        try:
+            data = json.loads(self._file.read_text())
+        except FileNotFoundError:
+            data = {"keys": []}
+        return data
+
+    def _write_jwks(self, data: dict[str, list[dict[str, str]]]) -> None:
+        self._file.write_text(json.dumps(data))
+        self._file.chmod(0o600)
+        shutil.chown(self._file, self._user, self._group)
 
 
 class SlurmManager(ABC):
@@ -588,3 +654,28 @@ class SlurmManager(ABC):
         self._env_manager.set(
             {f"{self._service.upper()}_OPTIONS": marshal_options(options)}, quote=False
         )
+
+
+def _log_security_event(level: str, event_type: str, event_data: str, description: str):
+    """Log an OWASP security event.
+
+    See: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Vocabulary_Cheat_Sheet.html
+
+    Args:
+        level: OWASP log level of the security event. Note, this is not the same as the charm
+            log level - all security events are logged at DEBUG level in the charm logs.
+        event_type: The OWASP event type
+        event_data: Name of the event in OWASP format
+        description: Human-readable description of the event
+    """
+    # Implementation of this function is inspired by the function with the same name in `ops`:
+    # https://github.com/canonical/operator/blob/9affc1e/ops/log.py#L154
+    log_message = {
+        "datetime": datetime.datetime.now().isoformat(),
+        "level": level,
+        "type": "security",
+        "appid": "slurm-charms",
+        "event": f"{event_type}:{event_data}",
+        "description": description,
+    }
+    _logger.debug(json.dumps(log_message))

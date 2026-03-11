@@ -17,10 +17,12 @@
 """Charmed operator for `slurmrestd`, Slurm's REST API service."""
 
 import logging
+from subprocess import CalledProcessError
 
 import ops
 from constants import SLURMRESTD_INTEGRATION_NAME, SLURMRESTD_PORT
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     SlurmctldDisconnectedEvent,
     SlurmctldReadyEvent,
     SlurmrestdProvider,
@@ -28,6 +30,7 @@ from hpc_libs.interfaces import (
     controller_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, refresh
 from slurm_ops import SlurmOpsError, SlurmrestdManager
 from state import check_slurmrestd, slurmrestd_installed
@@ -46,6 +49,7 @@ class SlurmrestdCharm(ops.CharmBase):
         self.slurmrestd = SlurmrestdManager(snap=False)
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.secret_changed, self._on_secret_changed)
 
         self.slurmctld = SlurmrestdProvider(self, SLURMRESTD_INTEGRATION_NAME)
         framework.observe(
@@ -95,7 +99,7 @@ class SlurmrestdCharm(ops.CharmBase):
         data = self.slurmctld.get_controller_data(event.relation.id)
 
         try:
-            self.slurmrestd.key.set(data.auth_key)
+            self.slurmrestd.key.set(data.auth_key, data.auth_key_content_id)
             for name, config in data.slurmconfig.items():
                 self.slurmrestd.config.includes[name].dump(config)
             self.slurmrestd.service.enable()
@@ -118,6 +122,42 @@ class SlurmrestdCharm(ops.CharmBase):
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus("Failed to stop `slurmrestd`. See `juju debug-log` for details")
+            )
+
+    @refresh
+    @block_unless(slurmrestd_installed)
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Handle when a secret is changed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' changed. ignoring", event.secret.label)
+            return
+
+        content = event.secret.get_content(refresh=True)
+        auth_key = content.get("key")
+        auth_key_id = content.get("keyid")
+        if not auth_key or not auth_key_id:
+            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+                )
+            )
+
+        self.slurmrestd.key.set(auth_key, auth_key_id)
+
+        # Necessary to load new key from file into the service
+        # TODO: replace with self.service.reload()
+        slurm_service = "slurmrestd.service"
+        try:
+            call("/usr/bin/systemctl", "reload", slurm_service)
+        except CalledProcessError as e:
+            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
+                )
             )
 
 

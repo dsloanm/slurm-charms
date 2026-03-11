@@ -18,6 +18,8 @@
 
 import logging
 import secrets
+from subprocess import CalledProcessError
+from uuid import uuid4
 
 import mail
 import ops
@@ -40,6 +42,7 @@ from constants import (
 )
 from high_availability import SlurmctldHA
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     ControllerData,
     OCIRuntimeDisconnectedEvent,
     OCIRuntimeReadyEvent,
@@ -60,6 +63,7 @@ from hpc_libs.interfaces import (
     partition_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.is_container import is_container
 from hpc_libs.utils import StopCharm, leader, plog, refresh
 from integrations import SlurmctldPeer, SlurmctldPeerConnectedEvent
@@ -124,6 +128,8 @@ class SlurmctldCharm(ops.CharmBase):
         framework.observe(self.on.start, self._on_start)
         framework.observe(self.on.config_changed, self._on_config_changed)
         framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.secret_remove, self._on_secret_remove)
+        framework.observe(self.on.rotate_auth_key_action, self._on_rotate_auth_key_action)
         framework.observe(self.on.show_current_config_action, self._on_show_current_config_action)
         framework.observe(self.on.set_node_state_action, self._on_set_node_state_action)
 
@@ -203,8 +209,19 @@ class SlurmctldCharm(ops.CharmBase):
                 # new unit is elected leader as it is being deployed
                 if not self.slurmctld.jwt.path.exists():
                     self.slurmctld.jwt.generate()
-                if not self.slurmctld.key.path.exists():
-                    self.slurmctld.key.generate()
+
+                try:
+                    self.model.get_secret(label=AUTH_KEY_LABEL)
+                    logger.debug("auth key secret found. skipping generation")
+                except ops.SecretNotFoundError:
+                    key = self.slurmctld.key.generate()
+                    # Auth key entries must each have a unique ID consistent across all units.
+                    # Secret revision number cannot be used as it is not known to secret observers.
+                    # Secret `unique_identifier` property is not unique per revision.
+                    # Therefore, a newly generated UUID is included with the secret contents.
+                    key_id = str(uuid4())
+                    self.app.add_secret({"key": key, "keyid": key_id}, label=AUTH_KEY_LABEL)
+                    self.slurmctld.key.add(key, key_id)
 
             self.unit.set_workload_version(self.slurmctld.version())
         except SlurmOpsError as e:
@@ -387,10 +404,11 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self._get_controllers()]
         self.sackd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 controllers=new_endpoints,
             ),
             integration_id=event.relation.id,
@@ -401,6 +419,7 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmd_ready(self, event: SlurmdReadyEvent) -> None:
         """Handle when partition data is ready from a `slurmd` application."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
         data = self.slurmd.get_compute_data(event.relation.id)
         name = data.partition.partition_name
         include = f"slurm.conf.{name}"
@@ -421,7 +440,7 @@ class SlurmctldCharm(ops.CharmBase):
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in self._get_controllers()]
         self.slurmd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 controllers=new_endpoints,
             ),
             integration_id=event.relation.id,
@@ -449,9 +468,10 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmdbd_connected(self, event: SlurmdbdConnectedEvent) -> None:
         """Handle when a new `slurmdbd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
         self.slurmdbd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 jwt_key=self.slurmctld.jwt.get(),
             ),
             integration_id=event.relation.id,
@@ -506,9 +526,10 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmrestd_connected(self, event: SlurmrestdConnectedEvent) -> None:
         """Handle when a new `slurmrestd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
         self.slurmrestd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 slurmconfig={
                     "slurm.conf": self.slurmctld.config.load(),
                     **{k: v.load() for k, v in self.slurmctld.config.includes.items()},
@@ -612,6 +633,51 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmctld.oci.delete()
         logger.info("`%s` configuration deleted successfully", self.slurmctld.oci.name)
 
+        self._reconfigure()
+
+    @leader
+    @refresh
+    @block_unless(slurmctld_installed)
+    def _on_secret_remove(self, event: ops.SecretRemoveEvent) -> None:
+        """Handle when a secret is removed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' removed. ignoring", event.secret.label)
+            return
+
+        self.slurmctld.key.keep_latest_key()
+        # Reconfigure must come before revision is removed to ensure secret ID can be retrieved for
+        # slurmrestd databag and prevent a SecretNotFoundError.
+        # TODO: Remove this once merging of databag info is implemented and the secret ID is no
+        # longer set in _reconfigure
+        self._reconfigure()
+
+        event.remove_revision()
+
+    @refresh
+    def _on_rotate_auth_key_action(self, event: ops.ActionEvent) -> None:
+        """Rotate the Slurm authentication key across the cluster."""
+        if not self.unit.is_leader():
+            event.fail("Only the leader unit can rotate the authentication key.")
+            return
+
+        # Update secrets backend with new key revision
+        new_key = self.slurmctld.key.generate()
+        new_key_id = str(uuid4())
+        try:
+            secret = self.model.get_secret(label=AUTH_KEY_LABEL)
+            secret.set_content({"key": new_key, "keyid": new_key_id})
+
+            # Force tracking of the new revision. Needed as this application is both the owner and
+            # an observer. Without this get_content call, the secret-remove event is not emitted
+            # after all other observers complete their key rotation, as this unit is still observing
+            # the old revision
+            secret.get_content(refresh=True)
+        except (ops.SecretNotFoundError, ModelError) as e:
+            logger.error("failed to rotate auth key. reason:\n%s", e)
+            event.fail("Failed to rotate auth key. See `juju debug-log` for details.")
+            return
+
+        self.slurmctld.key.add(new_key, new_key_id)
         self._reconfigure()
 
     def _on_show_current_config_action(self, event: ops.ActionEvent) -> None:
