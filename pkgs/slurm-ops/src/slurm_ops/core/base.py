@@ -20,11 +20,14 @@ __all__ = [
 ]
 
 import base64
+import datetime
+import json
 import logging
 import secrets
 import shutil
 import socket
 import textwrap
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -138,6 +141,34 @@ class SecretManager(Protocol):  # pragma: no cover
     def path(self) -> Path:
         """Get path to the secret file."""
         raise NotImplementedError
+
+    @staticmethod
+    def _log_security_event(
+        level: str, app_id: str, event_type: str, event_data: str, description: str
+    ):
+        """Log an OWASP security event.
+
+        See: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Vocabulary_Cheat_Sheet.html
+
+        Args:
+            level: OWASP log level of the security event. Note, this is not the same as the charm
+              log level - all security events are logged at DEBUG level in the charm logs.
+            app_id: Identifier for the application logging the event
+            event_type: The OWASP event type
+            event_data: Name of the event in OWASP format
+            description: Human-readable description of the event
+        """
+        # Implemention of this function is inspired by the function with the same name in `ops`:
+        # https://github.com/canonical/operator/blob/9affc1e/ops/log.py#L154
+        log_message = {
+            "datetime": datetime.datetime.now().isoformat(),
+            "level": level,
+            "type": "security",
+            "appid": app_id,
+            "event": f"{event_type}:{event_data}",
+            "description": description,
+        }
+        _logger.debug(json.dumps(log_message))
 
 
 class _AptManager(OpsManager):
@@ -473,6 +504,7 @@ class _JWTSecretManager(SecretManager):
         self._file = ops_manager.etc_path / "jwt_hs256.key"
         self._user = user
         self._group = group
+        self._app_id = f"charm-{ops_manager.version()}"
 
     def get(self) -> str:
         """Get the contents of the current `jwt_hs256.key` secret file."""
@@ -502,32 +534,100 @@ class _JWTSecretManager(SecretManager):
 
 
 class _SlurmSecretManager(SecretManager):
-    """Manage the `slurm.key` secret file."""
+    """Manage the `slurm.jwks` secret file."""
 
     def __init__(self, ops_manager: OpsManager, /, user: str, group: str) -> None:
-        self._file = ops_manager.etc_path / "slurm.key"
+        self._file = ops_manager.etc_path / "slurm.jwks"
         self._user = user
         self._group = group
+        self._app_id = f"charm-{ops_manager.version()}"
 
     def get(self) -> str:
-        """Get the contents of the current `slurm.key` secret file."""
+        """Get the current default key from the `slurm.jwks` secret file."""
         return base64.b64encode(self._file.read_bytes()).decode()
 
-    def set(self, secret: str) -> None:
-        """Set the contents of the `slurm.key` secret file."""
-        self._file.write_bytes(base64.b64decode(secret.encode()))
-        self._file.chmod(0o600)
-        shutil.chown(self._file, self._user, self._group)
-
     def generate(self) -> None:
-        """Generate a new, cryptographically secure `slurm.key` secret."""
-        key = secrets.token_bytes(2048)
-        self.set(base64.b64encode(key).decode())
+        """Generate a cryptographically secure `slurm.jwks` secret and add as the new default key.
+
+        Does not remove existing keys from the `slurm.jwks` file, allowing for multiple valid keys
+        to be present simultaneously to aid in key rotation.
+        """
+        data = self._load_jwks()
+
+        # Clear previous default key
+        for key in data["keys"]:
+            if key.get("use") == "default":
+                del key["use"]
+
+        # Key and ID generation
+        secret_bytes = secrets.token_bytes(2048)
+        secret = base64.b64encode(secret_bytes).decode()
+        kid = str(uuid.uuid4())
+
+        entry = self._make_key_entry(secret, kid)
+        data["keys"].append(entry)
+        self._write_jwks(data)
+
+        self._log_security_event(
+            "INFO",
+            self._app_id,
+            "authn_token_created",
+            "slurm-auth",
+            f"New Slurm authentication key set with KID {kid}",
+        )
+
+    def set(self, secret: str, kid: str | None = None) -> None:
+        """Write given secret to the `slurm.jwks` secret file.
+
+        Overwrites all existing keys in the `slurm.jwks` file, leaving the given key as the one
+        remaining valid key.
+        """
+        # Gather existing KIDs for logging purposes
+        data = self._load_jwks()
+        removed_kids = [key.get("kid") for key in data["keys"]]
+
+        kid = kid or str(uuid.uuid4())
+        new_entry = self._make_key_entry(secret, kid)
+        self._write_jwks({"keys": [new_entry]})
+
+        self._log_security_event(
+            "INFO",
+            self._app_id,
+            "authn_token_deleted",
+            "slurm-auth",
+            f"Old Slurm authentication keys: {removed_kids} revoked. Current default KID: {kid}",
+        )
 
     @property
     def path(self) -> Path:
-        """Get the path to the `slurm.key` secret file."""
+        """Get the path to the `slurm.jwks` secret file."""
         return self._file
+
+    def _make_key_entry(self, secret: str, kid: str) -> dict[str, str]:
+        """Create a key entry for the `slurm.jwks` secret file.
+
+        Format of the key entry defined in Slurm documentation:
+        https://slurm.schedmd.com/authentication.html#multiple_key_setup
+        """
+        return {
+            "alg": "HS256",
+            "kty": "oct",
+            "kid": kid,
+            "k": secret,
+            "use": "default",
+        }
+
+    def _load_jwks(self) -> dict[str, list[dict[str, str]]]:
+        try:
+            data = json.loads(self._file.read_text())
+        except FileNotFoundError:
+            data = {"keys": []}
+        return data
+
+    def _write_jwks(self, data: dict[str, list[dict[str, str]]]) -> None:
+        self._file.write_text(json.dumps(data))
+        self._file.chmod(0o600)
+        shutil.chown(self._file, self._user, self._group)
 
 
 class SlurmManager(ABC):
