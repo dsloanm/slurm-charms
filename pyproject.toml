@@ -113,7 +113,7 @@ skip = "_build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.pytest_cache
 # Formatting tools configuration
 [tool.black]
 line-length = 99
-target-version = ["py38"]
+target-version = ["py312"]
 
 # Linting tools configuration
 [tool.ruff]

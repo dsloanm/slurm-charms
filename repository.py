@@ -649,6 +649,7 @@ def fmt_cli(
     """Apply formatting standards to code."""
     files = get_source_dirs(charms)
     files.append(str(ROOT_DIR / "tests"))
+    files.append(str(PKGS_PATH))
     logging.info(f"Formatting directories {files} with ruff...")
     uv_run(["black"] + files, cwd=ROOT_DIR)
     uv_run(["ruff", "check", "--fix"] + files, cwd=ROOT_DIR)
@@ -662,6 +663,7 @@ def lint_cli(
     """Check code against coding style standards."""
     files = get_source_dirs(charms)
     files.append(str(ROOT_DIR / "tests"))
+    files.append(str(PKGS_PATH))
     logging.info("Target directories: %s", files)
     if fix:
         logging.info("Trying to automatically fix the lint errors.")
