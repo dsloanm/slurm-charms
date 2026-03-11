@@ -389,11 +389,9 @@ class TestSlurmdbdManager:
         """Request a mocked `SackdManager` instance."""
         fs.create_file(
             "/etc/default/slurmdbd",
-            contents=textwrap.dedent(
-                """
+            contents=textwrap.dedent("""
                 MYSQL_UNIX_PORT="/var/run/mysql/mysql.sock"
-                """
-            ),
+                """),
         )
         return SlurmdbdManager()
 

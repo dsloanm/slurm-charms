@@ -14,17 +14,19 @@
 
 """Classes and functions for composing Slurm service managers."""
 
-__all__ = ["SecretManager", "SlurmManager",]
+__all__ = [
+    "SecretManager",
+    "SlurmManager",
+]
 
 import base64
 import logging
 import secrets
-import shlex
 import shutil
 import socket
 import textwrap
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -212,16 +214,14 @@ class _AptManager(OpsManager):
     def _set_ulimit() -> None:
         """Set `ulimit` on nodes that need to be able to open many files at once."""
         ulimit_config_file = Path("/etc/security/limits.d/20-charmed-hpc-openfile.conf")
-        ulimit_config = textwrap.dedent(
-            """
+        ulimit_config = textwrap.dedent("""
             * soft nofile  1048576
             * hard nofile  1048576
             * soft memlock unlimited
             * hard memlock unlimited
             * soft stack unlimited
             * hard stack unlimited
-            """
-        )
+            """)
         _logger.debug("setting ulimit configuration for node to:\n%s", ulimit_config)
         ulimit_config_file.write_text(ulimit_config)
         ulimit_config_file.chmod(0o644)
@@ -279,18 +279,14 @@ class _AptManager(OpsManager):
                     "/etc/systemd/system/sackd.service.d/10-charmed-hpc.conf"
                 )
                 sackd_restart_override.parent.mkdir(exist_ok=True, parents=True)
-                sackd_restart_override.write_text(
-                    textwrap.dedent(
-                        """
+                sackd_restart_override.write_text(textwrap.dedent("""
                         [Unit]
                         StartLimitIntervalSec=90
                         StartLimitBurst=10
                         [Service]
                         Restart=on-failure
                         RestartSec=10
-                        """
-                    )
-                )
+                        """))
                 # TODO: https://github.com/charmed-hpc/hpc-libs/issues/54 -
                 #   Make `sackd` create its service environment file so that we
                 #   aren't required to manually create it here.
@@ -304,17 +300,13 @@ class _AptManager(OpsManager):
                     "/etc/systemd/system/slurmctld.service.d/10-charmed-hpc.conf"
                 )
                 nofile_override.parent.mkdir(exist_ok=True, parents=True)
-                nofile_override.write_text(
-                    textwrap.dedent(
-                        """
+                nofile_override.write_text(textwrap.dedent("""
                         [Service]
                         LimitMEMLOCK=infinity
                         LimitNOFILE=1048576
                         Restart=on-failure
                         RestartSec=10
-                        """
-                    )
-                )
+                        """))
                 systemctl("disable", "--now", "munge")
             case "slurmd":
                 _logger.debug("overriding default slurmd service configuration")
@@ -322,9 +314,7 @@ class _AptManager(OpsManager):
 
                 nofile_override = Path("/etc/systemd/system/slurmd.service.d/10-charmed-hpc.conf")
                 nofile_override.parent.mkdir(exist_ok=True, parents=True)
-                nofile_override.write_text(
-                    textwrap.dedent(
-                        """
+                nofile_override.write_text(textwrap.dedent("""
                         [Unit]
                         StartLimitIntervalSec=90
                         StartLimitBurst=10
@@ -334,9 +324,7 @@ class _AptManager(OpsManager):
                         LimitNOFILE=1048576
                         Restart=on-failure
                         RestartSec=10
-                        """
-                    )
-                )
+                        """))
 
                 systemctl("disable", "--now", "munge")
             case "slurmrestd":
@@ -375,9 +363,7 @@ class _AptManager(OpsManager):
 
                 _logger.debug("overriding default slurmrestd service configuration")
                 config_override = Path("/usr/lib/systemd/system/slurmrestd.service")
-                config_override.write_text(
-                    textwrap.dedent(
-                        """
+                config_override.write_text(textwrap.dedent("""
                         [Unit]
                         Description=Slurm REST daemon
                         After=network.target slurmctld.service
@@ -399,9 +385,7 @@ class _AptManager(OpsManager):
 
                         [Install]
                         WantedBy=multi-user.target
-                        """
-                    )
-                )
+                        """))
             case _:
                 _logger.debug("'%s' does not require any overrides", self._service_name)
 
