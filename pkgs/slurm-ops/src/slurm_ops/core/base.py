@@ -543,8 +543,13 @@ class _SlurmSecretManager(SecretManager):
         self._app_id = f"charm-{ops_manager.version()}"
 
     def get(self) -> str:
-        """Get the current default key from the `slurm.jwks` secret file."""
-        return base64.b64encode(self._file.read_bytes()).decode()
+        """Get the current default key entry from the `slurm.jwks` secret file."""
+        data = self._read_jwks()
+        for key in data.get("keys", []):
+            if key.get("use") == "default":
+                # FIXME: Do not return multiple values in a magic string. Fix SecretManager properly. SlurmSecret class needed?
+                return f"{key['kid']} {key['k']}"
+        raise SlurmOpsError("No default key found in slurm.jwks")
 
     def generate(self) -> None:
         """Generate a cryptographically secure `slurm.jwks` secret and add as the new default key.
@@ -552,7 +557,7 @@ class _SlurmSecretManager(SecretManager):
         Does not remove existing keys from the `slurm.jwks` file, allowing for multiple valid keys
         to be present simultaneously to aid in key rotation.
         """
-        data = self._load_jwks()
+        data = self._read_jwks()
 
         # Clear previous default key
         for key in data["keys"]:
@@ -583,7 +588,7 @@ class _SlurmSecretManager(SecretManager):
         remaining valid key.
         """
         # Gather existing KIDs for logging purposes
-        data = self._load_jwks()
+        data = self._read_jwks()
         removed_kids = [key.get("kid") for key in data["keys"]]
 
         kid = kid or str(uuid.uuid4())
@@ -617,7 +622,7 @@ class _SlurmSecretManager(SecretManager):
             "use": "default",
         }
 
-    def _load_jwks(self) -> dict[str, list[dict[str, str]]]:
+    def _read_jwks(self) -> dict[str, list[dict[str, str]]]:
         try:
             data = json.loads(self._file.read_text())
         except FileNotFoundError:
