@@ -51,6 +51,7 @@ from constants import (
 )
 from high_availability import SlurmctldHA
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     ControllerData,
     OCIRuntimeDisconnectedEvent,
     OCIRuntimeReadyEvent,
@@ -196,8 +197,15 @@ class SlurmctldCharm(ops.CharmBase):
                 # new unit is elected leader as it is being deployed
                 if not self.slurmctld.jwt.path.exists():
                     self.slurmctld.jwt.generate()
-                if not self.slurmctld.key.path.exists():
-                    self.slurmctld.key.generate()
+
+                try:
+                    self.model.get_secret(label=AUTH_KEY_LABEL)
+                    logger.debug("auth key secret found. skipping generation")
+                except ops.SecretNotFoundError:
+                    key = self.slurmctld.key.generate()
+                    secret = self.app.add_secret({ "key": key }, label=AUTH_KEY_LABEL)
+                    revision = secret.get_info().revision
+                    self.slurmctld.key.add(key, revision)
 
             self.unit.set_workload_version(self.slurmctld.version())
         except SlurmOpsError as e:
@@ -301,10 +309,17 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
+        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
+        if auth_key_id is None:
+            logger.warning("auth key secret has no ID yet. deferring")
+            event.defer()
+            return
+
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.sackd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 controllers=new_endpoints,
             ),
             integration_id=event.relation.id,
@@ -316,6 +331,13 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmd_ready(self, event: SlurmdReadyEvent) -> None:
         """Handle when partition data is ready from a `slurmd` application."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
+        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
+        if auth_key_id is None:
+            logger.warning("auth key secret has no ID yet. deferring")
+            event.defer()
+            return
+
         data = self.slurmd.get_compute_data(event.relation.id)
         name = data.partition.partition_name
         include = f"slurm.conf.{name}"
@@ -337,7 +359,7 @@ class SlurmctldCharm(ops.CharmBase):
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.slurmd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 controllers=new_endpoints,
             ),
             integration_id=event.relation.id,
@@ -363,9 +385,16 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmdbd_connected(self, event: SlurmdbdConnectedEvent) -> None:
         """Handle when a new `slurmdbd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
+        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
+        if auth_key_id is None:
+            logger.warning("auth key secret has no ID yet. deferring")
+            event.defer()
+            return
+
         self.slurmdbd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 jwt_key=self.slurmctld.jwt.get(),
             ),
             integration_id=event.relation.id,
@@ -418,9 +447,16 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmrestd_connected(self, event: SlurmrestdConnectedEvent) -> None:
         """Handle when a new `slurmrestd` application is connected."""
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
+        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
+        if auth_key_id is None:
+            logger.warning("auth key secret has no ID yet. deferring")
+            event.defer()
+            return
+
         self.slurmrestd.set_controller_data(
             ControllerData(
-                auth_key=self.slurmctld.key.get(),
+                auth_key_id=auth_key_id,
                 slurmconfig={
                     "slurm.conf": self.slurmctld.config.load(),
                     **{k: v.load() for k, v in self.slurmctld.config.includes.items()},

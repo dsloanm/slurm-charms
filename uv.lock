@@ -343,7 +343,7 @@ wheels = [
 [[package]]
 name = "hpc-libs"
 version = "0.1.2"
-source = { git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff#9fba44f1729eba44be5577f679e5c03f588bcfff" }
+source = { git = "https://github.com/dsloanm/hpc-libs?branch=auth-key#1133a75c97147d35c57c9f0f4f82a278acd2545c" }
 
 [package.optional-dependencies]
 all = [
@@ -984,7 +984,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "hpc-libs", git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "ops" },
     { name = "slurm-ops", editable = "pkgs/slurm-ops" },
 ]
@@ -1051,7 +1051,7 @@ requires-dist = [
     { name = "dbus-fast", marker = "extra == 'dev'", specifier = ">=1.90.2" },
     { name = "distro", marker = "extra == 'dev'", specifier = "==1.9.0" },
     { name = "flake8", marker = "extra == 'dev'" },
-    { name = "hpc-libs", extras = ["all"], git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", extras = ["all"], git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "influxdb", specifier = "==5.3.2" },
     { name = "jubilant", marker = "extra == 'dev'", specifier = "~=1.0" },
     { name = "nvidia-ml-py", specifier = "==12.560.30" },
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "hpc-libs", extras = ["machine"], git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", extras = ["machine"], git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "nvidia-ml-py" },
     { name = "slurmutils" },
 ]
@@ -1111,7 +1111,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cosl" },
-    { name = "hpc-libs", git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "influxdb" },
     { name = "ops" },
     { name = "psutil" },
@@ -1135,7 +1135,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cosl" },
-    { name = "hpc-libs", git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "ops" },
     { name = "slurm-ops", editable = "pkgs/slurm-ops" },
     { name = "slurmutils" },
@@ -1157,7 +1157,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cosl" },
-    { name = "hpc-libs", git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "ops" },
     { name = "slurm-ops", editable = "pkgs/slurm-ops" },
     { name = "slurmutils" },
@@ -1176,7 +1176,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "hpc-libs", git = "https://github.com/charmed-hpc/hpc-libs?rev=9fba44f1729eba44be5577f679e5c03f588bcfff" },
+    { name = "hpc-libs", git = "https://github.com/dsloanm/hpc-libs?branch=auth-key" },
     { name = "ops" },
     { name = "slurm-ops", editable = "pkgs/slurm-ops" },
     { name = "slurmutils" },
