@@ -20,6 +20,7 @@ import logging
 import ops
 from constants import SACKD_INTEGRATION_NAME, SACKD_PORT
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     SackdProvider,
     SlurmctldDisconnectedEvent,
     SlurmctldReadyEvent,
@@ -45,6 +46,7 @@ class SackdCharm(ops.CharmBase):
         self.sackd = SackdManager(snap=False)
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.secret_changed, self._on_secret_changed)
 
         self.slurmctld = SackdProvider(self, SACKD_INTEGRATION_NAME)
         framework.observe(
@@ -91,8 +93,19 @@ class SackdCharm(ops.CharmBase):
         """Handle when controller data is ready from `slurmctld`."""
         data = self.slurmctld.get_controller_data(event.relation.id)
 
+        auth_secret = self.model.get_secret(id=data.auth_key_id, label=AUTH_KEY_LABEL)
+        auth_key = auth_secret.get_content().get("key")
+        if auth_key is None:
+            logger.error("auth key not found in secret with id '%s'", data.auth_key_id)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+                )
+            )
+
         try:
-            self.sackd.key.set(data.auth_key)
+            self.sackd.key.set(auth_key, auth_secret.get_info().revision)
             self.sackd.conf_server = data.controllers
             self.sackd.service.enable()
             self.sackd.service.restart()
@@ -117,6 +130,26 @@ class SackdCharm(ops.CharmBase):
             raise StopCharm(
                 ops.BlockedStatus("Failed to stop `sackd`. See `juju debug-log` for details")
             )
+
+    @refresh
+    @block_unless(sackd_installed)
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Handle when a secret is changed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' changed. ignoring", event.secret.label)
+            return
+
+        auth_key = event.secret.get_content(refresh=True).get("key")
+        if auth_key is None:
+            logger.error("auth key not found in secret with id '%s'", event.secret.get_info().id)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+                )
+            )
+
+        self.sackd.key.set(auth_key, event.secret.get_info().revision)
 
 
 if __name__ == "__main__":  # pragma: nocover

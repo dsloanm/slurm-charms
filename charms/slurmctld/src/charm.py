@@ -554,6 +554,8 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmctld.oci.delete()
         logger.info("`oci.conf` successfully deleted")
 
+    @reconfigure
+    @block_unless(slurmctld_installed)
     def _on_secret_remove(self, event: ops.SecretRemoveEvent) -> None:
         """Handle when a secret is removed."""
         if event.secret.label != AUTH_KEY_LABEL:

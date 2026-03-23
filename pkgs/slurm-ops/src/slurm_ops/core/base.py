@@ -523,16 +523,7 @@ class _SlurmSecretManager:
         """Add given key to the `slurm.jwks` key file as the new default key."""
         data = self._read_jwks()
 
-        # Format of the key entry defined in Slurm documentation:
-        # https://slurm.schedmd.com/authentication.html#multiple_key_setup
-        new_entry = {
-            "alg": "HS256",
-            "kty": "oct",
-            "kid": str(key_id),
-            "k": key,
-            "use": "default",
-        }
-
+        new_entry = self._get_new_entry(key, key_id)
         data["keys"].append(new_entry)
         self._write_jwks(data)
 
@@ -568,10 +559,38 @@ class _SlurmSecretManager:
             f"Deleted Slurm authentication key ID: {key_id}",
         )
 
+    def set(self, key: str, key_id: int) -> None:
+        """Set the `slurm.jwks` key file to contain only the given key as the default key."""
+        new_entry = self._get_new_entry(key, key_id)
+        self._write_jwks({"keys": [new_entry]})
+
+        _log_security_event(
+            "INFO",
+            self._app_id,
+            "authn_token_created",
+            "slurm-auth",
+            f"Slurm authentication key set with key ID: {key_id}",
+        )
+
     @property
     def path(self) -> Path:
         """Get the path to the `slurm.jwks` secret file."""
         return self._file
+
+    @staticmethod
+    def _get_new_entry(key: str, key_id: int) -> dict[str, str]:
+        """Get a new key entry for the `slurm.jwks` key file.
+
+        Format of the key entry is defined in Slurm documentation:
+        https://slurm.schedmd.com/authentication.html#multiple_key_setup
+        """
+        return {
+            "alg": "HS256",
+            "kty": "oct",
+            "kid": str(key_id),
+            "k": key,
+            "use": "default",
+        }
 
     def _read_jwks(self) -> dict[str, list[dict[str, str]]]:
         try:
