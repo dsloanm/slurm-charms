@@ -544,30 +544,28 @@ class _SlurmSecretManager:
             f"New Slurm authentication key added with key ID: {key_id}",
         )
 
-    def clean_up(self) -> None:
-        """Remove all non-default keys from the `slurm.jwks` key file, leaving only the default key."""
-        # Filter default key from non-defaults
+    def remove(self, key_id: int) -> None:
+        """Remove the key with the given key ID from the `slurm.jwks` key file."""
         data = self._read_jwks()
-        default_key_entry = None
-        removed_key_ids = []
+        kept_keys = []
+        removed = False
         for entry in data["keys"]:
-            if entry.get("use") == "default":
-                default_key_entry = entry
-            else:
-                removed_key_ids.append(entry[("kid")])
+            if entry.get("kid") == str(key_id):
+                removed = True
+                continue
+            kept_keys.append(entry)
 
-        if default_key_entry is None:
-            raise SlurmOpsError("No default key found in slurm.jwks")
+        if not removed:
+            raise SlurmOpsError(f"Key ID: {key_id} not found")
 
-        # Ensure only the default key is preserved
-        self._write_jwks({"keys": [default_key_entry]})
+        self._write_jwks({"keys": kept_keys})
 
         _log_security_event(
             "INFO",
             self._app_id,
             "authn_token_deleted",
             "slurm-auth",
-            f"Deleted Slurm authentication key IDs: {removed_key_ids}. Current default key ID: {default_key_entry['kid']}",
+            f"Deleted Slurm authentication key ID: {key_id}",
         )
 
     @property

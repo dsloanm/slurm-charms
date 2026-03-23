@@ -118,6 +118,8 @@ class SlurmctldCharm(ops.CharmBase):
         framework.observe(self.on.start, self._on_start)
         framework.observe(self.on.config_changed, self._on_config_changed)
         framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.secret_remove, self._on_secret_remove)
+        framework.observe(self.on.rotate_auth_key_action, self._on_rotate_auth_key_action)
         framework.observe(self.on.show_current_config_action, self._on_show_current_config_action)
         framework.observe(self.on.set_node_state_action, self._on_set_node_state_action)
 
@@ -551,6 +553,37 @@ class SlurmctldCharm(ops.CharmBase):
         logger.info("deleting `oci.conf`")
         self.slurmctld.oci.delete()
         logger.info("`oci.conf` successfully deleted")
+
+    def _on_secret_remove(self, event: ops.SecretRemoveEvent) -> None:
+        """Handle when a secret is removed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' removed. ignoring", event.secret.label)
+            return
+
+        self.slurmctld.key.remove(event.secret.get_info().revision)
+        event.remove_revision()
+
+    @reconfigure
+    def _on_rotate_auth_key_action(self, event: ops.ActionEvent) -> None:
+        """Rotate the Slurm authentication key across the cluster."""
+        if not self.unit.is_leader():
+            event.fail("Only the leader unit can rotate the authentication key.")
+            return
+
+        # Update secrets backend with new key revision
+        new_key = self.slurmctld.key.generate()
+        try:
+            secret = self.model.get_secret(label=AUTH_KEY_LABEL)
+            secret.set_content({"key": new_key})
+        except (ops.SecretNotFoundError, ModelError) as e:
+            logger.error("failed to rotate auth key. reason:\n%s", e)
+            event.fail("Failed to rotate auth key. See `juju debug-log` for details.")
+            return
+
+        # Add the new revision to the key file alongside the old keys. Both new and old keys must be
+        # present until all units have rotated to the new key.
+        revision = secret.get_info().revision
+        self.slurmctld.key.add(new_key, revision)
 
     def _on_show_current_config_action(self, event: ops.ActionEvent) -> None:
         """Show current slurm.conf."""
