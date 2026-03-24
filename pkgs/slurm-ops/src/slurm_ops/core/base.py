@@ -27,7 +27,6 @@ import secrets
 import shutil
 import socket
 import textwrap
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -476,7 +475,6 @@ class _JWTSecretManager(SecretManager):
         self._file = ops_manager.etc_path / "jwt_hs256.key"
         self._user = user
         self._group = group
-        self._app_id = f"charm-{ops_manager.version()}"
 
     def get(self) -> str:
         """Get the contents of the current `jwt_hs256.key` secret file."""
@@ -512,16 +510,21 @@ class _SlurmSecretManager:
         self._file = ops_manager.etc_path / "slurm.jwks"
         self._user = user
         self._group = group
-        self._app_id = f"charm-{ops_manager.version()}"
 
     def generate(self) -> str:
-        """Generate a cryptographically secure `slurm.jwks` key"""
+        """Generate a cryptographically secure `slurm.jwks` key."""
         key = base64.b64encode(secrets.token_bytes(2048)).decode()
         return key
 
-    def add(self, key: str, key_id: int) -> None:
+    def add(self, key: str, key_id: str) -> None:
         """Add given key to the `slurm.jwks` key file as the new default key."""
         data = self._read_jwks()
+
+        # Clear existing default key
+        # A valid key file contains only a single default key.
+        for entry in data["keys"]:
+            if entry.get("use") == "default":
+                del entry["use"]
 
         new_entry = self._get_new_entry(key, key_id)
         data["keys"].append(new_entry)
@@ -529,19 +532,33 @@ class _SlurmSecretManager:
 
         _log_security_event(
             "INFO",
-            self._app_id,
             "authn_token_created",
             "slurm-auth",
             f"New Slurm authentication key added with key ID: {key_id}",
         )
 
-    def remove(self, key_id: int) -> None:
+    def clean_up(self) -> None:
+        """Remove all non-default keys from the `slurm.jwks` key file."""
+        data = self._read_jwks()
+
+        default_key = None
+        for entry in data["keys"]:
+            if entry.get("use") == "default":
+                default_key = entry
+                break
+
+        if default_key is None:
+            raise SlurmOpsError("no default key found in slurm.jwks")
+
+        self._write_jwks({"keys": [default_key]})
+
+    def remove(self, key_id: str) -> None:
         """Remove the key with the given key ID from the `slurm.jwks` key file."""
         data = self._read_jwks()
         kept_keys = []
         removed = False
         for entry in data["keys"]:
-            if entry.get("kid") == str(key_id):
+            if entry.get("kid") == key_id:
                 removed = True
                 continue
             kept_keys.append(entry)
@@ -553,20 +570,18 @@ class _SlurmSecretManager:
 
         _log_security_event(
             "INFO",
-            self._app_id,
             "authn_token_deleted",
             "slurm-auth",
             f"Deleted Slurm authentication key ID: {key_id}",
         )
 
-    def set(self, key: str, key_id: int) -> None:
+    def set(self, key: str, key_id: str) -> None:
         """Set the `slurm.jwks` key file to contain only the given key as the default key."""
         new_entry = self._get_new_entry(key, key_id)
         self._write_jwks({"keys": [new_entry]})
 
         _log_security_event(
             "INFO",
-            self._app_id,
             "authn_token_created",
             "slurm-auth",
             f"Slurm authentication key set with key ID: {key_id}",
@@ -578,7 +593,7 @@ class _SlurmSecretManager:
         return self._file
 
     @staticmethod
-    def _get_new_entry(key: str, key_id: int) -> dict[str, str]:
+    def _get_new_entry(key: str, key_id: str) -> dict[str, str]:
         """Get a new key entry for the `slurm.jwks` key file.
 
         Format of the key entry is defined in Slurm documentation:
@@ -587,7 +602,7 @@ class _SlurmSecretManager:
         return {
             "alg": "HS256",
             "kty": "oct",
-            "kid": str(key_id),
+            "kid": key_id,
             "k": key,
             "use": "default",
         }
@@ -664,8 +679,9 @@ class SlurmManager(ABC):
             {f"{self._service.upper()}_OPTIONS": marshal_options(options)}, quote=False
         )
 
+
 def _log_security_event(
-    level: str, app_id: str, event_type: str, event_data: str, description: str
+    level: str, event_type: str, event_data: str, description: str
 ):
     """Log an OWASP security event.
 
@@ -674,7 +690,6 @@ def _log_security_event(
     Args:
         level: OWASP log level of the security event. Note, this is not the same as the charm
             log level - all security events are logged at DEBUG level in the charm logs.
-        app_id: Identifier for the application logging the event
         event_type: The OWASP event type
         event_data: Name of the event in OWASP format
         description: Human-readable description of the event
@@ -685,7 +700,7 @@ def _log_security_event(
         "datetime": datetime.datetime.now().isoformat(),
         "level": level,
         "type": "security",
-        "appid": app_id,
+        "appid": "slurm-charms",
         "event": f"{event_type}:{event_data}",
         "description": description,
     }

@@ -19,6 +19,7 @@
 import logging
 import secrets
 from typing import cast
+from uuid import uuid4
 
 import mail
 import ops
@@ -205,9 +206,13 @@ class SlurmctldCharm(ops.CharmBase):
                     logger.debug("auth key secret found. skipping generation")
                 except ops.SecretNotFoundError:
                     key = self.slurmctld.key.generate()
-                    secret = self.app.add_secret({ "key": key }, label=AUTH_KEY_LABEL)
-                    revision = secret.get_info().revision
-                    self.slurmctld.key.add(key, revision)
+                    # Auth key entries must each have a unique ID consistent across all units.
+                    # Secret revision number cannot be used as it is not known to secret observers.
+                    # Secret `unique_identifier` property is not unique per revision.
+                    # Therefore, a newly generated UUID is included with the secret contents.
+                    key_id = str(uuid4())
+                    self.app.add_secret({"key": key, "keyid": key_id}, label=AUTH_KEY_LABEL)
+                    self.slurmctld.key.add(key, key_id)
 
             self.unit.set_workload_version(self.slurmctld.version())
         except SlurmOpsError as e:
@@ -311,12 +316,8 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
-        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
-        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
-        if auth_key_id is None:
-            logger.warning("auth key secret has no ID yet. deferring")
-            event.defer()
-            return
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
+        # TODO: handle SecretNotFoundError and ModelError
 
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.sackd.set_controller_data(
@@ -333,12 +334,8 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmd_ready(self, event: SlurmdReadyEvent) -> None:
         """Handle when partition data is ready from a `slurmd` application."""
-        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
-        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
-        if auth_key_id is None:
-            logger.warning("auth key secret has no ID yet. deferring")
-            event.defer()
-            return
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
+        # TODO: handle SecretNotFoundError and ModelError
 
         data = self.slurmd.get_compute_data(event.relation.id)
         name = data.partition.partition_name
@@ -387,12 +384,8 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmdbd_connected(self, event: SlurmdbdConnectedEvent) -> None:
         """Handle when a new `slurmdbd` application is connected."""
-        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
-        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
-        if auth_key_id is None:
-            logger.warning("auth key secret has no ID yet. deferring")
-            event.defer()
-            return
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
+        # TODO: handle SecretNotFoundError and ModelError
 
         self.slurmdbd.set_controller_data(
             ControllerData(
@@ -449,12 +442,8 @@ class SlurmctldCharm(ops.CharmBase):
     @block_unless(slurmctld_installed)
     def _on_slurmrestd_connected(self, event: SlurmrestdConnectedEvent) -> None:
         """Handle when a new `slurmrestd` application is connected."""
-        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).id
-        # TODO: handle this (and SecretNotFoundError and ModelError) more gracefully
-        if auth_key_id is None:
-            logger.warning("auth key secret has no ID yet. deferring")
-            event.defer()
-            return
+        auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
+        # TODO: handle SecretNotFoundError and ModelError
 
         self.slurmrestd.set_controller_data(
             ControllerData(
@@ -562,7 +551,14 @@ class SlurmctldCharm(ops.CharmBase):
             logger.warning("secret with label '%s' removed. ignoring", event.secret.label)
             return
 
-        self.slurmctld.key.remove(event.secret.get_info().revision)
+        # TODO: this doesn't work. The keyid retrieved is for the latest revision and not the revision this event is regarding
+        # key_id = event.secret.get_content()["keyid"]
+        # try:
+        #     self.slurmctld.key.remove(key_id)
+        # except SlurmOpsError as e:
+        #     logger.warning(e.message)
+
+        self.slurmctld.key.clean_up()
         event.remove_revision()
 
     @reconfigure
@@ -574,18 +570,20 @@ class SlurmctldCharm(ops.CharmBase):
 
         # Update secrets backend with new key revision
         new_key = self.slurmctld.key.generate()
+        new_key_id = str(uuid4())
         try:
             secret = self.model.get_secret(label=AUTH_KEY_LABEL)
-            secret.set_content({"key": new_key})
+            secret.set_content({"key": new_key, "keyid": new_key_id})
         except (ops.SecretNotFoundError, ModelError) as e:
             logger.error("failed to rotate auth key. reason:\n%s", e)
             event.fail("Failed to rotate auth key. See `juju debug-log` for details.")
             return
 
-        # Add the new revision to the key file alongside the old keys. Both new and old keys must be
-        # present until all units have rotated to the new key.
-        revision = secret.get_info().revision
-        self.slurmctld.key.add(new_key, revision)
+        self.slurmctld.key.add(new_key, new_key_id)
+
+        # Force charm to track the new revision. Necessary as this is both the owner and an observer
+        # TODO: confirm
+        secret.get_content(refresh=True)
 
     def _on_show_current_config_action(self, event: ops.ActionEvent) -> None:
         """Show current slurm.conf."""

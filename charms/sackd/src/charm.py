@@ -94,8 +94,10 @@ class SackdCharm(ops.CharmBase):
         data = self.slurmctld.get_controller_data(event.relation.id)
 
         auth_secret = self.model.get_secret(id=data.auth_key_id, label=AUTH_KEY_LABEL)
-        auth_key = auth_secret.get_content().get("key")
-        if auth_key is None:
+        auth_content = auth_secret.get_content()
+        auth_key = auth_content.get("key")
+        auth_key_id = auth_content.get("keyid")
+        if auth_key is None or auth_key_id is None:
             logger.error("auth key not found in secret with id '%s'", data.auth_key_id)
             event.defer()
             raise StopCharm(
@@ -105,7 +107,7 @@ class SackdCharm(ops.CharmBase):
             )
 
         try:
-            self.sackd.key.set(auth_key, auth_secret.get_info().revision)
+            self.sackd.key.set(auth_key, auth_key_id)
             self.sackd.conf_server = data.controllers
             self.sackd.service.enable()
             self.sackd.service.restart()
@@ -139,9 +141,11 @@ class SackdCharm(ops.CharmBase):
             logger.warning("secret with label '%s' changed. ignoring", event.secret.label)
             return
 
-        auth_key = event.secret.get_content(refresh=True).get("key")
-        if auth_key is None:
-            logger.error("auth key not found in secret with id '%s'", event.secret.get_info().id)
+        content = event.secret.get_content(refresh=True)
+        auth_key = content.get("key")
+        auth_key_id = content.get("keyid")
+        if auth_key is None or auth_key_id is None:
+            logger.error("auth key not found in secret with label '%s'", event.secret.label)
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(
@@ -149,7 +153,15 @@ class SackdCharm(ops.CharmBase):
                 )
             )
 
-        self.sackd.key.set(auth_key, event.secret.get_info().revision)
+        try:
+            self.sackd.key.set(auth_key, auth_key_id)
+            self.sackd.service.restart()
+        except SlurmOpsError as e:
+            logger.error(e.message)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus("Failed to start `sackd`. See `juju debug-log` for details")
+            )
 
 
 if __name__ == "__main__":  # pragma: nocover
