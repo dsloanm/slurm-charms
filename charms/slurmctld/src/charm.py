@@ -551,14 +551,7 @@ class SlurmctldCharm(ops.CharmBase):
             logger.warning("secret with label '%s' removed. ignoring", event.secret.label)
             return
 
-        # TODO: this doesn't work. The keyid retrieved is for the latest revision and not the revision this event is regarding
-        # key_id = event.secret.get_content()["keyid"]
-        # try:
-        #     self.slurmctld.key.remove(key_id)
-        # except SlurmOpsError as e:
-        #     logger.warning(e.message)
-
-        self.slurmctld.key.clean_up()
+        self.slurmctld.key.remove_non_default()
         event.remove_revision()
 
     @reconfigure
@@ -574,16 +567,16 @@ class SlurmctldCharm(ops.CharmBase):
         try:
             secret = self.model.get_secret(label=AUTH_KEY_LABEL)
             secret.set_content({"key": new_key, "keyid": new_key_id})
+            # Force charm to track the new revision. Needed as it is both the owner and an observer
+            # Without this, the secret-remove event is not emitted after all other charms complete
+            # their key rotation, as this charm is still observing the old revision
+            secret.get_content(refresh=True)
         except (ops.SecretNotFoundError, ModelError) as e:
             logger.error("failed to rotate auth key. reason:\n%s", e)
             event.fail("Failed to rotate auth key. See `juju debug-log` for details.")
             return
 
         self.slurmctld.key.add(new_key, new_key_id)
-
-        # Force charm to track the new revision. Necessary as this is both the owner and an observer
-        # TODO: confirm
-        secret.get_content(refresh=True)
 
     def _on_show_current_config_action(self, event: ops.ActionEvent) -> None:
         """Show current slurm.conf."""

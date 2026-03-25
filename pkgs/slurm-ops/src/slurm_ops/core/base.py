@@ -537,42 +537,32 @@ class _SlurmSecretManager:
             f"New Slurm authentication key added with key ID: {key_id}",
         )
 
-    def clean_up(self) -> None:
-        """Remove all non-default keys from the `slurm.jwks` key file."""
+    def remove_non_default(self) -> None:
+        """Remove non-default keys from the `slurm.jwks` key file, leaving only a single default key."""
+        # Filter default key from non-defaults
+        # A valid key file contains at most two keys - typically one with a second temporarily
+        # available during a key rotation. This function can handle invalid files with 3+ keys as a
+        # precaution and restores the file to a valid state with a single default key.
         data = self._read_jwks()
-
-        default_key = None
+        default_key_entry = None
+        removed_key_ids = []
         for entry in data["keys"]:
             if entry.get("use") == "default":
-                default_key = entry
-                break
+                default_key_entry = entry
+            else:
+                removed_key_ids.append(entry["kid"])
 
-        if default_key is None:
-            raise SlurmOpsError("no default key found in slurm.jwks")
+        if default_key_entry is None:
+            raise SlurmOpsError("No default key found in slurm.jwks")
 
-        self._write_jwks({"keys": [default_key]})
-
-    def remove(self, key_id: str) -> None:
-        """Remove the key with the given key ID from the `slurm.jwks` key file."""
-        data = self._read_jwks()
-        kept_keys = []
-        removed = False
-        for entry in data["keys"]:
-            if entry.get("kid") == key_id:
-                removed = True
-                continue
-            kept_keys.append(entry)
-
-        if not removed:
-            raise SlurmOpsError(f"Key ID: {key_id} not found")
-
-        self._write_jwks({"keys": kept_keys})
+        # Ensure only the default key is preserved
+        self._write_jwks({"keys": [default_key_entry]})
 
         _log_security_event(
             "INFO",
             "authn_token_deleted",
             "slurm-auth",
-            f"Deleted Slurm authentication key ID: {key_id}",
+            f"Deleted Slurm authentication key IDs: {removed_key_ids}. Current default key ID: {default_key_entry['kid']}",
         )
 
     def set(self, key: str, key_id: str) -> None:
