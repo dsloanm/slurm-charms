@@ -93,21 +93,8 @@ class SackdCharm(ops.CharmBase):
         """Handle when controller data is ready from `slurmctld`."""
         data = self.slurmctld.get_controller_data(event.relation.id)
 
-        auth_secret = self.model.get_secret(id=data.auth_key_id, label=AUTH_KEY_LABEL)
-        auth_content = auth_secret.get_content()
-        auth_key = auth_content.get("key")
-        auth_key_id = auth_content.get("keyid")
-        if auth_key is None or auth_key_id is None:
-            logger.error("auth key not found in secret with id '%s'", data.auth_key_id)
-            event.defer()
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
-                )
-            )
-
         try:
-            self.sackd.key.set(auth_key, auth_key_id)
+            self.sackd.key.set(data.auth_key, data.auth_key_content_id)
             self.sackd.conf_server = data.controllers
             self.sackd.service.enable()
             self.sackd.service.restart()

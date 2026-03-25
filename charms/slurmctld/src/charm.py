@@ -567,7 +567,7 @@ class SlurmctldCharm(ops.CharmBase):
         try:
             secret = self.model.get_secret(label=AUTH_KEY_LABEL)
             secret.set_content({"key": new_key, "keyid": new_key_id})
-            # Force charm to track the new revision. Needed as it is both the owner and an observer
+            # Force charm to track the new revision. Needed as it is both the owner and an observer.
             # Without this, the secret-remove event is not emitted after all other charms complete
             # their key rotation, as this charm is still observing the old revision
             secret.get_content(refresh=True)
