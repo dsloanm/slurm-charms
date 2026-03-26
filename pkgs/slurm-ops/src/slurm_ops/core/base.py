@@ -517,15 +517,8 @@ class _SlurmSecretManager:
         return key
 
     def add(self, key: str, key_id: str) -> None:
-        """Add given key to the `slurm.jwks` key file as the new default key."""
+        """Append given key to the `slurm.jwks` key file."""
         data = self._read_jwks()
-
-        # Clear existing default key
-        # A valid key file contains only a single default key.
-        for entry in data["keys"]:
-            if entry.get("use") == "default":
-                del entry["use"]
-
         new_entry = self._get_new_entry(key, key_id)
         data["keys"].append(new_entry)
         self._write_jwks(data)
@@ -537,36 +530,26 @@ class _SlurmSecretManager:
             f"New Slurm authentication key added with key ID: {key_id}",
         )
 
-    def remove_non_default(self) -> None:
-        """Remove non-default keys from the `slurm.jwks` key file, leaving only a single default key."""
-        # Filter default key from non-defaults
-        # A valid key file contains at most two keys - typically one with a second temporarily
-        # available during a key rotation. This function can handle invalid files with 3+ keys as a
-        # precaution and restores the file to a valid state with a single default key.
+    def keep_latest_key(self) -> None:
+        """Preserve the most recently added key in the `slurm.jwks` key file and remove all others."""
         data = self._read_jwks()
-        default_key_entry = None
-        removed_key_ids = []
-        for entry in data["keys"]:
-            if entry.get("use") == "default":
-                default_key_entry = entry
-            else:
-                removed_key_ids.append(entry["kid"])
+        if not data["keys"]:
+            raise SlurmOpsError("No keys found in slurm.jwks")
 
-        if default_key_entry is None:
-            raise SlurmOpsError("No default key found in slurm.jwks")
-
-        # Ensure only the default key is preserved
-        self._write_jwks({"keys": [default_key_entry]})
+        # Most recently added key is last in list
+        last_entry = data["keys"][-1]
+        removed_key_ids = [entry["kid"] for entry in data["keys"][:-1]]
+        self._write_jwks({"keys": [last_entry]})
 
         _log_security_event(
             "INFO",
             "authn_token_deleted",
             "slurm-auth",
-            f"Deleted Slurm authentication key IDs: {removed_key_ids}. Current default key ID: {default_key_entry['kid']}",
+            f"Deleted Slurm authentication key IDs: {removed_key_ids}. Current key ID: {last_entry['kid']}",
         )
 
     def set(self, key: str, key_id: str) -> None:
-        """Set the `slurm.jwks` key file to contain only the given key as the default key."""
+        """Set the `slurm.jwks` key file to contain only the given key."""
         new_entry = self._get_new_entry(key, key_id)
         self._write_jwks({"keys": [new_entry]})
 
@@ -594,7 +577,6 @@ class _SlurmSecretManager:
             "kty": "oct",
             "kid": key_id,
             "k": key,
-            "use": "default",
         }
 
     def _read_jwks(self) -> dict[str, list[dict[str, str]]]:

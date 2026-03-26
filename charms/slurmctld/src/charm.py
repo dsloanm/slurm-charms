@@ -551,7 +551,7 @@ class SlurmctldCharm(ops.CharmBase):
             logger.warning("secret with label '%s' removed. ignoring", event.secret.label)
             return
 
-        self.slurmctld.key.remove_non_default()
+        self.slurmctld.key.keep_latest_key()
         event.remove_revision()
 
     @reconfigure
@@ -567,9 +567,11 @@ class SlurmctldCharm(ops.CharmBase):
         try:
             secret = self.model.get_secret(label=AUTH_KEY_LABEL)
             secret.set_content({"key": new_key, "keyid": new_key_id})
-            # Force charm to track the new revision. Needed as it is both the owner and an observer.
-            # Without this, the secret-remove event is not emitted after all other charms complete
-            # their key rotation, as this charm is still observing the old revision
+
+            # Force tracking of the new revision. Needed as this application is both the owner and
+            # an observer. Without this get_content call, the secret-remove event is not emitted
+            # after all other observers complete their key rotation, as this unit is still observing
+            # the old revision
             secret.get_content(refresh=True)
         except (ops.SecretNotFoundError, ModelError) as e:
             logger.error("failed to rotate auth key. reason:\n%s", e)

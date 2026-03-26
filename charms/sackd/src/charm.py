@@ -16,6 +16,7 @@
 """Charmed operator for `sackd`, Slurm's authentication kiosk service."""
 
 import logging
+from subprocess import CalledProcessError
 
 import ops
 from constants import SACKD_INTEGRATION_NAME, SACKD_PORT
@@ -28,6 +29,7 @@ from hpc_libs.interfaces import (
     controller_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, refresh
 from slurm_ops import SackdManager, SlurmOpsError
 from state import check_sackd, sackd_installed
@@ -140,14 +142,28 @@ class SackdCharm(ops.CharmBase):
                 )
             )
 
+        self.sackd.key.set(auth_key, auth_key_id)
+
+        # TODO: replace with self.sackd.service.reload()
+        # Necessary to load new key into the service. If this is not done, the old key will still be
+        # in use by this service when slurmctld deletes it and performs an "scontrol reconfigure".
+        # The reconfigure will then fail due to Protocol Authentication errors and the controller
+        # will not be contactable.
+        #
+        # TODO: Alternative is to handle this in the slurmctld secret-remove handler by:
+        #   1. `scontrol reconfigure` before deleting the old key
+        #   2. Delete the old key
+        #   3. `scontrol reconfigure` again after deleting the old key
+        # However, reloading here seem preferable to two `scontrol reconfigure`s in quick succession
         try:
-            self.sackd.key.set(auth_key, auth_key_id)
-            self.sackd.service.restart()
-        except SlurmOpsError as e:
-            logger.error(e.message)
+            call("/usr/bin/systemctl", "reload", "sackd.service")
+        except CalledProcessError as e:
+            logger.exception("failed to reload sackd.service. reason:\n%s", e)
             event.defer()
             raise StopCharm(
-                ops.BlockedStatus("Failed to start `sackd`. See `juju debug-log` for details")
+                ops.BlockedStatus(
+                    "Failed to reload sackd.service. See `juju debug-log` for details"
+                )
             )
 
 
