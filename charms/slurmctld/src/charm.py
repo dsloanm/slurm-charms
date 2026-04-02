@@ -18,6 +18,7 @@
 
 import logging
 import secrets
+from subprocess import CalledProcessError
 from typing import cast
 from uuid import uuid4
 
@@ -73,6 +74,7 @@ from hpc_libs.interfaces import (
     partition_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, leader, plog, reconfigure, refresh
 from integrations import SlurmctldPeer, SlurmctldPeerConnectedEvent
 from interface_influxdb import InfluxDB, InfluxDBAvailableEvent, InfluxDBUnavailableEvent
@@ -317,8 +319,6 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_sackd_connected(self, event: SackdConnectedEvent) -> None:
         """Handle when a new `sackd` application is connected."""
         auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
-        # TODO: handle SecretNotFoundError and ModelError
-
         new_endpoints = [f"{c}:{SLURMCTLD_PORT}" for c in get_controllers(self)]
         self.sackd.set_controller_data(
             ControllerData(
@@ -335,8 +335,6 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_slurmd_ready(self, event: SlurmdReadyEvent) -> None:
         """Handle when partition data is ready from a `slurmd` application."""
         auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
-        # TODO: handle SecretNotFoundError and ModelError
-
         data = self.slurmd.get_compute_data(event.relation.id)
         name = data.partition.partition_name
         include = f"slurm.conf.{name}"
@@ -385,8 +383,6 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_slurmdbd_connected(self, event: SlurmdbdConnectedEvent) -> None:
         """Handle when a new `slurmdbd` application is connected."""
         auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
-        # TODO: handle SecretNotFoundError and ModelError
-
         self.slurmdbd.set_controller_data(
             ControllerData(
                 auth_key_id=auth_key_id,
@@ -443,8 +439,6 @@ class SlurmctldCharm(ops.CharmBase):
     def _on_slurmrestd_connected(self, event: SlurmrestdConnectedEvent) -> None:
         """Handle when a new `slurmrestd` application is connected."""
         auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
-        # TODO: handle SecretNotFoundError and ModelError
-
         self.slurmrestd.set_controller_data(
             ControllerData(
                 auth_key_id=auth_key_id,
@@ -543,6 +537,7 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmctld.oci.delete()
         logger.info("`oci.conf` successfully deleted")
 
+    @leader
     @reconfigure
     @block_unless(slurmctld_installed)
     def _on_secret_remove(self, event: ops.SecretRemoveEvent) -> None:

@@ -572,6 +572,10 @@ class _SlurmSecretManager:
         Format of the key entry is defined in Slurm documentation:
         https://slurm.schedmd.com/authentication.html#multiple_key_setup
         """
+        if not key:
+            raise ValueError("Empty key provided")
+        if not key_id:
+            raise ValueError("Empty key ID provided")
         return {
             "alg": "HS256",
             "kty": "oct",
@@ -652,9 +656,7 @@ class SlurmManager(ABC):
         )
 
 
-def _log_security_event(
-    level: str, event_type: str, event_data: str, description: str
-):
+def _log_security_event(level: str, event_type: str, event_data: str, description: str):
     """Log an OWASP security event.
 
     See: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Vocabulary_Cheat_Sheet.html

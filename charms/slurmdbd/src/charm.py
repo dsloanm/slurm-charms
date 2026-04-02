@@ -19,6 +19,7 @@
 # pyright: reportAttributeAccessIssue=false
 
 import logging
+from subprocess import CalledProcessError
 from typing import Any
 from urllib.parse import urlparse
 
@@ -38,12 +39,14 @@ from constants import (
     SLURMDBD_PORT,
 )
 from hpc_libs.interfaces import (
+    AUTH_KEY_LABEL,
     SlurmctldReadyEvent,
     SlurmdbdProvider,
     block_unless,
     controller_ready,
     wait_unless,
 )
+from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, leader, reconfigure, refresh
 from slurm_ops import SlurmdbdManager, SlurmOpsError
 from state import check_slurmdbd, slurmdbd_installed
@@ -74,6 +77,7 @@ class SlurmdbdCharm(ops.CharmBase):
         framework.observe(self.on.start, self._on_start)
         framework.observe(self.on.config_changed, self._on_config_changed)
         framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.secret_changed, self._on_secret_changed)
 
         self.slurmctld = SlurmdbdProvider(self, SLURMDBD_INTEGRATION_NAME)
         framework.observe(self.slurmctld.on.slurmctld_ready, self._on_slurmctld_ready)
@@ -154,8 +158,44 @@ class SlurmdbdCharm(ops.CharmBase):
         """Handle when controller data is ready from `slurmctld`."""
         data = self.slurmctld.get_controller_data(event.relation.id)
 
-        self.slurmdbd.key.set(data.auth_key)
+        self.slurmdbd.key.set(data.auth_key, data.auth_key_content_id)
         self.slurmdbd.jwt.set(data.jwt_key)
+
+    @refresh
+    @block_unless(slurmdbd_installed)
+    def _on_secret_changed(self, event: ops.SecretChangedEvent) -> None:
+        """Handle when a secret is changed."""
+        if event.secret.label != AUTH_KEY_LABEL:
+            logger.warning("secret with label '%s' changed. ignoring", event.secret.label)
+            return
+
+        content = event.secret.get_content(refresh=True)
+        auth_key = content.get("key")
+        auth_key_id = content.get("keyid")
+        if not auth_key or not auth_key_id:
+            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+                )
+            )
+
+        self.slurmdbd.key.set(auth_key, auth_key_id)
+
+        # Necessary to load new key from file into the service
+        # TODO: replace with self.service.reload()
+        slurm_service = "slurmdbd.service"
+        try:
+            call("/usr/bin/systemctl", "reload", slurm_service)
+        except CalledProcessError as e:
+            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
+            event.defer()
+            raise StopCharm(
+                ops.BlockedStatus(
+                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
+                )
+            )
 
     @leader
     @refresh

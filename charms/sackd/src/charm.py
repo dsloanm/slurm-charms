@@ -48,7 +48,7 @@ class SackdCharm(ops.CharmBase):
         self.sackd = SackdManager(snap=False)
         framework.observe(self.on.install, self._on_install)
         framework.observe(self.on.update_status, self._on_update_status)
-        self.framework.observe(self.on.secret_changed, self._on_secret_changed)
+        framework.observe(self.on.secret_changed, self._on_secret_changed)
 
         self.slurmctld = SackdProvider(self, SACKD_INTEGRATION_NAME)
         framework.observe(
@@ -133,8 +133,8 @@ class SackdCharm(ops.CharmBase):
         content = event.secret.get_content(refresh=True)
         auth_key = content.get("key")
         auth_key_id = content.get("keyid")
-        if auth_key is None or auth_key_id is None:
-            logger.error("auth key not found in secret with label '%s'", event.secret.label)
+        if not auth_key or not auth_key_id:
+            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(
@@ -144,25 +144,17 @@ class SackdCharm(ops.CharmBase):
 
         self.sackd.key.set(auth_key, auth_key_id)
 
-        # TODO: replace with self.sackd.service.reload()
-        # Necessary to load new key into the service. If this is not done, the old key will still be
-        # in use by this service when slurmctld deletes it and performs an "scontrol reconfigure".
-        # The reconfigure will then fail due to Protocol Authentication errors and the controller
-        # will not be contactable.
-        #
-        # TODO: Alternative is to handle this in the slurmctld secret-remove handler by:
-        #   1. `scontrol reconfigure` before deleting the old key
-        #   2. Delete the old key
-        #   3. `scontrol reconfigure` again after deleting the old key
-        # However, reloading here seem preferable to two `scontrol reconfigure`s in quick succession
+        # Necessary to load new key from file into the service
+        # TODO: replace with self.service.reload()
+        slurm_service = "sackd.service"
         try:
-            call("/usr/bin/systemctl", "reload", "sackd.service")
+            call("/usr/bin/systemctl", "reload", slurm_service)
         except CalledProcessError as e:
-            logger.exception("failed to reload sackd.service. reason:\n%s", e)
+            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(
-                    "Failed to reload sackd.service. See `juju debug-log` for details"
+                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
                 )
             )
 
