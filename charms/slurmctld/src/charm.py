@@ -538,6 +538,7 @@ class SlurmctldCharm(ops.CharmBase):
         logger.info("`oci.conf` successfully deleted")
 
     @leader
+    @refresh
     @reconfigure
     @block_unless(slurmctld_installed)
     def _on_secret_remove(self, event: ops.SecretRemoveEvent) -> None:
@@ -549,6 +550,7 @@ class SlurmctldCharm(ops.CharmBase):
         self.slurmctld.key.keep_latest_key()
         event.remove_revision()
 
+    @refresh
     @reconfigure
     def _on_rotate_auth_key_action(self, event: ops.ActionEvent) -> None:
         """Rotate the Slurm authentication key across the cluster."""

@@ -14,6 +14,7 @@
 
 """Manage the state of the `slurmctld` charmed operator."""
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -150,6 +151,25 @@ def slurmctld_ready(charm: "SlurmctldCharm") -> bool:
         )
     )
 
+def auth_key_ready(charm: "SlurmctldCharm") -> ConditionEvaluation:
+    """Check if the Slurm authentication key is valid."""
+    try:
+        keys = json.loads(charm.slurmctld.key.path.read_text())
+    except FileNotFoundError:
+        return ConditionEvaluation(False, "Authentication key file not found")
+    except json.JSONDecodeError:
+       return ConditionEvaluation(False, "Authentication key file malformed")
+    except OSError:
+        return ConditionEvaluation(False, "Authentication key file inaccessible")
+
+    if len(keys.get("keys", [])) > 1:
+        return ConditionEvaluation(
+            False,
+            "Authentication key rotation in progress. Waiting for rotation to complete.",
+        )
+
+    return ConditionEvaluation(True, "")
+
 
 def check_slurmctld(charm: "SlurmctldCharm") -> ops.StatusBase:
     """Determine the state of the `slurmctld` application/unit based on satisfied conditions."""
@@ -162,6 +182,10 @@ def check_slurmctld(charm: "SlurmctldCharm") -> ops.StatusBase:
         return ops.WaitingStatus(message)
 
     ok, message = slurmctld_is_active(charm)
+    if not ok:
+        return ops.WaitingStatus(message)
+
+    ok, message = auth_key_ready(charm)
     if not ok:
         return ops.WaitingStatus(message)
 
