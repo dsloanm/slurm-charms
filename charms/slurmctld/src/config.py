@@ -24,7 +24,7 @@ from constants import (
     DEFAULT_SLURM_CONFIG,
     OVERRIDES_CONFIG_FILE,
 )
-from hpc_libs.interfaces import ControllerData
+from hpc_libs.interfaces import AUTH_KEY_LABEL, ControllerData
 from hpc_libs.is_container import is_container
 from hpc_libs.utils import StopCharm, plog
 from slurm_ops import SlurmOpsError, scontrol
@@ -213,8 +213,10 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
         )
 
     if charm.slurmrestd.is_joined():
+        auth_key_id = charm.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
         charm.slurmrestd.set_controller_data(
             ControllerData(
+                auth_key_id=auth_key_id,
                 slurmconfig={
                     "slurm.conf": charm.slurmctld.config.load(),
                     **{k: v.load() for k, v in charm.slurmctld.config.includes.items()},
