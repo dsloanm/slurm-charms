@@ -269,12 +269,13 @@ def test_rotate_auth_key(juju: jubilant.Juju) -> None:
             assert len(new_key_entry["keys"]) == 1
             assert new_key_entry != initial_key_entry
 
-            # Check new key present on all other units
+            # Check new key present on all other units and controller is reachable
             for unit in other_units:
                 result = juju.exec("sudo cat /etc/slurm/slurm.jwks", unit=unit)
                 key_entry = json.loads(result.stdout)
                 assert len(key_entry["keys"]) == 1
                 assert key_entry == new_key_entry, f"auth key rotation failed on: {unit}"
+                assert juju.exec("sinfo", unit=unit).success, f"controller unreachable from: {unit}"
 
 
 @pytest.mark.order(11)

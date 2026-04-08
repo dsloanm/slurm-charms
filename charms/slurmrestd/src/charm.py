@@ -145,20 +145,10 @@ class SlurmrestdCharm(ops.CharmBase):
             )
 
         self.slurmrestd.key.set(auth_key, auth_key_id)
-
-        # Necessary to load new key from file into the service
-        # TODO: replace with self.service.reload()
-        slurm_service = "slurmrestd.service"
-        try:
-            call("/usr/bin/systemctl", "reload", slurm_service)
-        except CalledProcessError as e:
-            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
-            event.defer()
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
-                )
-            )
+        # Other Slurm charms reload the service here. That is not possible for slurmrestd as the
+        # process shuts down when the reload signal is sent. Restart instead.
+        # TODO: Determine a zero-downtime solution
+        self.slurmrestd.service.restart()
 
 
 if __name__ == "__main__":
