@@ -876,14 +876,20 @@ class SlurmctldCharm(ops.CharmBase):
             )
 
         if self.slurmrestd.is_joined():
-            self.slurmrestd.set_controller_data(
-                ControllerData(
-                    slurmconfig={
-                        "slurm.conf": self.slurmctld.config.load(),
-                        **{k: v.load() for k, v in self.slurmctld.config.includes.items()},
-                    }
+            # TODO: Remove setting of key ID once merging of databag info is implemented. Only the
+            # slurmconfig needs updated. The auth_key_id should not be overwritten
+            auth_key_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
+            for integration in self.model.relations.get(SLURMRESTD_INTEGRATION_NAME, []):
+                self.slurmrestd.set_controller_data(
+                    ControllerData(
+                        auth_key_id=auth_key_id,
+                        slurmconfig={
+                            "slurm.conf": self.slurmctld.config.load(),
+                            **{k: v.load() for k, v in self.slurmctld.config.includes.items()},
+                        }
+                    ),
+                    integration_id=integration.id,
                 )
-            )
 
     def _merge_controller_data(self, app: SackdRequirer | SlurmdRequirer, new_endpoints) -> None:
         """Merge new controller endpoints with existing controller data."""
