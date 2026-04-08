@@ -23,6 +23,7 @@ from constants import (
     DEFAULT_GRES_CONFIG,
     DEFAULT_SLURM_CONFIG,
     OVERRIDES_CONFIG_FILE,
+    SLURMRESTD_INTEGRATION_NAME,
 )
 from hpc_libs.interfaces import AUTH_KEY_LABEL, ControllerData
 from hpc_libs.is_container import is_container
@@ -214,12 +215,14 @@ def reconfigure_slurmctld(charm: "SlurmctldCharm") -> None:
 
     if charm.slurmrestd.is_joined():
         auth_key_id = charm.model.get_secret(label=AUTH_KEY_LABEL).get_info().id
-        charm.slurmrestd.set_controller_data(
-            ControllerData(
-                auth_key_id=auth_key_id,
-                slurmconfig={
-                    "slurm.conf": charm.slurmctld.config.load(),
-                    **{k: v.load() for k, v in charm.slurmctld.config.includes.items()},
-                }
+        for integration in charm.model.relations.get(SLURMRESTD_INTEGRATION_NAME, []):
+            charm.slurmrestd.set_controller_data(
+                ControllerData(
+                    auth_key_id=auth_key_id,
+                    slurmconfig={
+                        "slurm.conf": charm.slurmctld.config.load(),
+                        **{k: v.load() for k, v in charm.slurmctld.config.includes.items()},
+                    },
+                ),
+                integration_id=integration.id,
             )
-        )
