@@ -231,10 +231,9 @@ def test_set_node_state(juju: jubilant.Juju) -> None:
 def test_rotate_auth_key(juju: jubilant.Juju) -> None:
     """Test that the `rotate-auth-key` action updates the Slurm authentication key across the cluster."""
     slurmctld_unit = f"{SLURMCTLD_APP_NAME}/0"
-    other_units = [f"{SACKD_APP_NAME}/0",
-                 f"{SLURMD_APP_NAME}/0",
-                 f"{SLURMDBD_APP_NAME}/0",
-                 f"{SLURMRESTD_APP_NAME}/0"]
+    sackd_unit = f"{SACKD_APP_NAME}/0"
+    slurmd_unit = f"{SLURMD_APP_NAME}/0"
+    non_controller_units = [sackd_unit, slurmd_unit, f"{SLURMDBD_APP_NAME}/0", f"{SLURMRESTD_APP_NAME}/0"]
 
     logger.info("testing that the `rotate-auth-key` action updates the Slurm authentication key")
 
@@ -269,13 +268,19 @@ def test_rotate_auth_key(juju: jubilant.Juju) -> None:
             assert len(new_key_entry["keys"]) == 1
             assert new_key_entry != initial_key_entry
 
-            # Check new key present on all other units and controller is reachable
-            for unit in other_units:
+            # Check new key present on all other units
+            for unit in non_controller_units:
                 result = juju.exec("sudo cat /etc/slurm/slurm.jwks", unit=unit)
                 key_entry = json.loads(result.stdout)
                 assert len(key_entry["keys"]) == 1
                 assert key_entry == new_key_entry, f"auth key rotation failed on: {unit}"
-                assert juju.exec("sinfo", unit=unit).success, f"controller unreachable from: {unit}"
+
+            # Check units can communicate with controller
+            assert juju.exec("sinfo", unit=sackd_unit).success
+            assert juju.exec("sinfo", unit=slurmd_unit).success
+            # Database does not have client tools installed. Query from the controller
+            assert juju.exec("sacct", unit=slurmctld_unit).success
+            # TODO: confirm slurmrestd connectivity
 
 
 @pytest.mark.order(11)

@@ -186,19 +186,11 @@ class SlurmdbdCharm(ops.CharmBase):
 
         self.slurmdbd.key.set(auth_key, auth_key_id)
 
-        # Necessary to load new key from file into the service
-        # TODO: replace with self.service.reload()
-        slurm_service = "slurmdbd.service"
-        try:
-            call("/usr/bin/systemctl", "reload", slurm_service)
-        except CalledProcessError as e:
-            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
-            event.defer()
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
-                )
-            )
+        # Other Slurm charms reload the service here. That is not possible for slurmdbd as the
+        # SIGHUP reload signal does not reload the key file. Restart instead.
+        # TODO: Determine a zero-downtime solution. Consider filing a Slurm bug requesting slurmdbd
+        # reloading match the behavior of sackd, slurmctld and slurmd.
+        self.slurmdbd.service.restart()
 
     @leader
     @refresh

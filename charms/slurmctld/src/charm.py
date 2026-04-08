@@ -671,6 +671,7 @@ class SlurmctldCharm(ops.CharmBase):
             # an observer. Without this get_content call, the secret-remove event is not emitted
             # after all other observers complete their key rotation, as this unit is still observing
             # the old revision
+            # TODO: Confirm if this behavior has changed in Juju 4
             secret.get_content(refresh=True)
         except (ops.SecretNotFoundError, ModelError) as e:
             logger.error("failed to rotate auth key. reason:\n%s", e)

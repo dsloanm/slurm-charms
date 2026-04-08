@@ -222,18 +222,9 @@ class SlurmdCharm(ops.CharmBase):
         self.slurmd.key.set(auth_key, auth_key_id)
 
         # Necessary to load new key from file into the service
-        # TODO: replace with self.service.reload()
-        slurm_service = "slurmd.service"
-        try:
-            call("/usr/bin/systemctl", "reload", slurm_service)
-        except CalledProcessError as e:
-            logger.exception("failed to reload %s. reason:\n%s", slurm_service, e)
-            event.defer()
-            raise StopCharm(
-                ops.BlockedStatus(
-                    "Failed to reload %s. See `juju debug-log` for details" % slurm_service
-                )
-            )
+        # FIXME: slurmd reloading is currently broken. Service restart is used as a workaround but
+        # this breaks zero-downtime key rotation. This must be replaced with a reload
+        self.slurmd.service.restart()
 
     @refresh
     def _on_set_node_config_action(self, event: ops.ActionEvent) -> None:
