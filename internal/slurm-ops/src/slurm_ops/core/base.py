@@ -512,7 +512,7 @@ class _SlurmSecretManager:
         self._group = group
 
     def generate(self) -> str:
-        """Generate a cryptographically secure `slurm.jwks` key."""
+        """Return cryptographically secure Slurm auth key data."""
         key = base64.b64encode(secrets.token_bytes(2048)).decode()
         return key
 
