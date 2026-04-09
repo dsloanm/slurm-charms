@@ -32,7 +32,7 @@ SLURM_KEY_CONTENTS = {
             "alg": "HS256",
             "kty": "oct",
             "kid": "12345678-90ab-cdef-1234-567890abcdef",
-            "k": "MTIzNDU2Nzg5MA=="
+            "k": "MTIzNDU2Nzg5MA==",
         }
     ]
 }

@@ -176,8 +176,9 @@ class TestSlurmdCharm:
         self, mock_charm, mocker: MockerFixture, mock_restart, ready, leader, expected
     ) -> None:
         """Test the `_on_slurmctld_ready` event handler."""
-        auth_key_secret = testing.Secret(tracked_content={"key": EXAMPLE_AUTH_KEY,
-                                                          "keyid": EXAMPLE_AUTH_CONTENT_ID})
+        auth_key_secret = testing.Secret(
+            tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": EXAMPLE_AUTH_CONTENT_ID}
+        )
 
         integration_id = 1
         integration = testing.Relation(

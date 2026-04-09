@@ -18,7 +18,6 @@
 
 import logging
 import secrets
-from subprocess import CalledProcessError
 from uuid import uuid4
 
 import mail
@@ -63,7 +62,6 @@ from hpc_libs.interfaces import (
     partition_ready,
     wait_unless,
 )
-from hpc_libs.machine import call
 from hpc_libs.is_container import is_container
 from hpc_libs.utils import StopCharm, leader, plog, refresh
 from integrations import SlurmctldPeer, SlurmctldPeerConnectedEvent
@@ -887,7 +885,7 @@ class SlurmctldCharm(ops.CharmBase):
                         slurmconfig={
                             "slurm.conf": self.slurmctld.config.load(),
                             **{k: v.load() for k, v in self.slurmctld.config.includes.items()},
-                        }
+                        },
                     ),
                     integration_id=integration.id,
                 )

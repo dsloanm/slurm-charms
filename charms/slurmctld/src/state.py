@@ -151,6 +151,7 @@ def slurmctld_ready(charm: "SlurmctldCharm") -> bool:
         )
     )
 
+
 def auth_key_ready(charm: "SlurmctldCharm") -> ConditionEvaluation:
     """Check if the Slurm authentication key is valid."""
     try:
@@ -158,7 +159,7 @@ def auth_key_ready(charm: "SlurmctldCharm") -> ConditionEvaluation:
     except FileNotFoundError:
         return ConditionEvaluation(False, "Authentication key file not found")
     except json.JSONDecodeError:
-       return ConditionEvaluation(False, "Authentication key file malformed")
+        return ConditionEvaluation(False, "Authentication key file malformed")
     except OSError:
         return ConditionEvaluation(False, "Authentication key file inaccessible")
 

@@ -24,7 +24,6 @@ from constants import SLURMRESTD_INTEGRATION_NAME
 from hpc_libs.interfaces import AUTH_KEY_LABEL
 from ops import testing
 from pytest_mock import MockerFixture
-from slurm_ops import SlurmOpsError
 
 EXAMPLE_AUTH_KEY = "xyz123=="
 EXAMPLE_AUTH_KEY_ID = "12345678-90ab-cdef-1234-567890abcdef"
@@ -34,7 +33,10 @@ EXAMPLE_CONTROLLERS = ["juju-988225-0:6817", "juju-988225-1:6817"]
 @pytest.fixture
 def auth_key_secret() -> testing.Secret:
     """Mock Slurm auth key secret."""
-    return testing.Secret(label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": EXAMPLE_AUTH_KEY_ID})
+    return testing.Secret(
+        label=AUTH_KEY_LABEL,
+        tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": EXAMPLE_AUTH_KEY_ID},
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,12 +56,7 @@ class TestSlurmrestdCharm:
         key_file_path = Path("/etc/slurm/slurm.jwks")
         expected_key_file_content = {
             "keys": [
-                {
-                    "alg": "HS256",
-                    "kty": "oct",
-                    "kid": EXAMPLE_AUTH_KEY_ID,
-                    "k": EXAMPLE_AUTH_KEY
-                }
+                {"alg": "HS256", "kty": "oct", "kid": EXAMPLE_AUTH_KEY_ID, "k": EXAMPLE_AUTH_KEY}
             ]
         }
 
@@ -97,7 +94,9 @@ class TestSlurmrestdCharm:
         self, mock_charm, mocker: MockerFixture, leader
     ) -> None:
         """Test `_on_secret_changed` event handler when auth key ID is empty."""
-        auth_key_secret = testing.Secret(label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": ""})
+        auth_key_secret = testing.Secret(
+            label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": ""}
+        )
         integration_id = 1
         integration = testing.Relation(
             endpoint=SLURMRESTD_INTEGRATION_NAME,
@@ -120,4 +119,6 @@ class TestSlurmrestdCharm:
 
             state = manager.run()
 
-        assert state.unit_status == ops.BlockedStatus("Failed to retrieve Slurm authentication key. See `juju debug-log` for details")
+        assert state.unit_status == ops.BlockedStatus(
+            "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+        )

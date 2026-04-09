@@ -17,7 +17,6 @@
 """Charmed operator for `slurmrestd`, Slurm's REST API service."""
 
 import logging
-from subprocess import CalledProcessError
 
 import ops
 from constants import SLURMRESTD_INTEGRATION_NAME, SLURMRESTD_PORT
@@ -30,7 +29,6 @@ from hpc_libs.interfaces import (
     controller_ready,
     wait_unless,
 )
-from hpc_libs.machine import call
 from hpc_libs.utils import StopCharm, refresh
 from slurm_ops import SlurmOpsError, SlurmrestdManager
 from state import check_slurmrestd, slurmrestd_installed
@@ -136,7 +134,9 @@ class SlurmrestdCharm(ops.CharmBase):
         auth_key = content.get("key")
         auth_key_id = content.get("keyid")
         if not auth_key or not auth_key_id:
-            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
+            logger.error(
+                "auth key or key ID is empty in secret with label '%s'", event.secret.label
+            )
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(

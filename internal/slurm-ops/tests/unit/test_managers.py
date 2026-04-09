@@ -16,7 +16,6 @@
 """Unit tests for the Slurm service operation managers."""
 
 import base64
-from email import generator
 import json
 import subprocess
 import textwrap
@@ -66,9 +65,11 @@ class TestManager:
     @pytest.fixture
     def mock_slurm_key(self, fs: FakeFilesystem, mock_manager, snap_backend) -> SlurmManager:
         """Request a Slurm service manager with a fake Slurm auth key file."""
-
         if snap_backend:
-            fs.create_file("/var/snap/slurm/common/etc/slurm/slurm.jwks", contents=json.dumps(SLURM_KEY_CONTENTS))
+            fs.create_file(
+                "/var/snap/slurm/common/etc/slurm/slurm.jwks",
+                contents=json.dumps(SLURM_KEY_CONTENTS),
+            )
         else:
             fs.create_file("/etc/slurm/slurm.jwks", contents=json.dumps(SLURM_KEY_CONTENTS))
 
@@ -181,12 +182,7 @@ class TestManager:
         """Test the `<manager>.key.add(...)` method appends a new key."""
         new_key = "xyz123=="
         new_key_id = "abcdef12-3456-7890-abcd-ef1234567890"
-        new_key_entry = {
-            "alg": "HS256",
-            "kty": "oct",
-            "kid": new_key_id,
-            "k": new_key
-        }
+        new_key_entry = {"alg": "HS256", "kty": "oct", "kid": new_key_id, "k": new_key}
 
         mock_slurm_key.key.add(new_key, new_key_id)
 
@@ -200,14 +196,7 @@ class TestManager:
         new_key = "xyz123=="
         new_key_id = "abcdef12-3456-7890-abcd-ef1234567890"
         new_key_contents = {
-            "keys": [
-                {
-                    "alg": "HS256",
-                    "kty": "oct",
-                    "kid": new_key_id,
-                    "k": new_key
-                }
-            ]
+            "keys": [{"alg": "HS256", "kty": "oct", "kid": new_key_id, "k": new_key}]
         }
 
         mock_slurm_key.key.add(new_key, new_key_id)
@@ -217,18 +206,11 @@ class TestManager:
         assert file_contents == new_key_contents
 
     def test_set_slurm_key(self, mock_slurm_key) -> None:
-        """Test the `<manager>.key.set(...)` method succesfully overwrites key file."""
+        """Test the `<manager>.key.set(...)` method successfully overwrites key file."""
         new_key = "xyz123=="
         new_key_id = "abcdef12-3456-7890-abcd-ef1234567890"
         new_key_contents = {
-            "keys": [
-                {
-                    "alg": "HS256",
-                    "kty": "oct",
-                    "kid": new_key_id,
-                    "k": new_key
-                }
-            ]
+            "keys": [{"alg": "HS256", "kty": "oct", "kid": new_key_id, "k": new_key}]
         }
 
         mock_slurm_key.key.set(new_key, new_key_id)

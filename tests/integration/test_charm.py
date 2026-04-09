@@ -233,7 +233,12 @@ def test_rotate_auth_key(juju: jubilant.Juju) -> None:
     slurmctld_unit = f"{SLURMCTLD_APP_NAME}/0"
     sackd_unit = f"{SACKD_APP_NAME}/0"
     slurmd_unit = f"{SLURMD_APP_NAME}/0"
-    non_controller_units = [sackd_unit, slurmd_unit, f"{SLURMDBD_APP_NAME}/0", f"{SLURMRESTD_APP_NAME}/0"]
+    non_controller_units = [
+        sackd_unit,
+        slurmd_unit,
+        f"{SLURMDBD_APP_NAME}/0",
+        f"{SLURMRESTD_APP_NAME}/0",
+    ]
 
     logger.info("testing that the `rotate-auth-key` action updates the Slurm authentication key")
 

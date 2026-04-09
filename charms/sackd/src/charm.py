@@ -134,7 +134,9 @@ class SackdCharm(ops.CharmBase):
         auth_key = content.get("key")
         auth_key_id = content.get("keyid")
         if not auth_key or not auth_key_id:
-            logger.error("auth key or key ID is empty in secret with label '%s'", event.secret.label)
+            logger.error(
+                "auth key or key ID is empty in secret with label '%s'", event.secret.label
+            )
             event.defer()
             raise StopCharm(
                 ops.BlockedStatus(

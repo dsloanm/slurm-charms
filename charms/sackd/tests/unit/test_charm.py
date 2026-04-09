@@ -34,7 +34,10 @@ EXAMPLE_CONTROLLERS = ["juju-988225-0:6817", "juju-988225-1:6817"]
 @pytest.fixture
 def auth_key_secret() -> testing.Secret:
     """Mock Slurm auth key secret."""
-    return testing.Secret(label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": EXAMPLE_AUTH_KEY_ID})
+    return testing.Secret(
+        label=AUTH_KEY_LABEL,
+        tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": EXAMPLE_AUTH_KEY_ID},
+    )
 
 
 @pytest.mark.parametrize(
@@ -111,7 +114,14 @@ class TestSackdCharm:
         ),
     )
     def test_on_slurmctld_ready(
-        self, mock_charm, mocker: MockerFixture, mock_restart, ready, leader, expected, auth_key_secret
+        self,
+        mock_charm,
+        mocker: MockerFixture,
+        mock_restart,
+        ready,
+        leader,
+        expected,
+        auth_key_secret,
     ) -> None:
         """Test the `_on_slurmctld_ready` event handler."""
         integration_id = 1
@@ -196,12 +206,7 @@ class TestSackdCharm:
         key_file_path = Path("/etc/slurm/slurm.jwks")
         expected_key_file_content = {
             "keys": [
-                {
-                    "alg": "HS256",
-                    "kty": "oct",
-                    "kid": EXAMPLE_AUTH_KEY_ID,
-                    "k": EXAMPLE_AUTH_KEY
-                }
+                {"alg": "HS256", "kty": "oct", "kid": EXAMPLE_AUTH_KEY_ID, "k": EXAMPLE_AUTH_KEY}
             ]
         }
 
@@ -239,7 +244,9 @@ class TestSackdCharm:
         self, mock_charm, mocker: MockerFixture, leader
     ) -> None:
         """Test `_on_secret_changed` event handler when auth key ID is empty."""
-        auth_key_secret = testing.Secret(label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": ""})
+        auth_key_secret = testing.Secret(
+            label=AUTH_KEY_LABEL, tracked_content={"key": EXAMPLE_AUTH_KEY, "keyid": ""}
+        )
         integration_id = 1
         integration = testing.Relation(
             endpoint=SACKD_INTEGRATION_NAME,
@@ -262,4 +269,6 @@ class TestSackdCharm:
 
             state = manager.run()
 
-        assert state.unit_status == ops.BlockedStatus("Failed to retrieve Slurm authentication key. See `juju debug-log` for details")
+        assert state.unit_status == ops.BlockedStatus(
+            "Failed to retrieve Slurm authentication key. See `juju debug-log` for details"
+        )

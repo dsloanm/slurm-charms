@@ -14,11 +14,11 @@
 
 """Configure unit tests for the `slurmctld` charm."""
 
-from pyfakefs.fake_filesystem import FakeFilesystem
 import pytest
-from pytest_mock import MockerFixture
 from charm import SlurmrestdCharm
 from ops import testing
+from pyfakefs.fake_filesystem import FakeFilesystem
+from pytest_mock import MockerFixture
 
 
 @pytest.fixture(scope="function")
@@ -26,8 +26,11 @@ def mock_ctx() -> testing.Context[SlurmrestdCharm]:
     """Mock `SlurmrestdCharm`."""
     return testing.Context(SlurmrestdCharm)
 
+
 @pytest.fixture(scope="function")
-def mock_charm(mock_ctx, fs: FakeFilesystem, mocker: MockerFixture) -> testing.Context[SlurmrestdCharm]:
+def mock_charm(
+    mock_ctx, fs: FakeFilesystem, mocker: MockerFixture
+) -> testing.Context[SlurmrestdCharm]:
     """Mock `SlurmrestdCharm` context with fake filesystem."""
     fs.create_file("/etc/slurm/slurm.jwks", create_missing_dirs=True)
     fs.create_file("/etc/default/slurmrestd", create_missing_dirs=True)
