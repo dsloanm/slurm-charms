@@ -27,7 +27,7 @@ default:
 setup: env
 
 # Clean project directory
-clean:
+clean: lock
     {{uv_run}} repository.py clean
 
 # Apply static checks
@@ -46,7 +46,7 @@ test *targets:
             echo "Running $target tests..."
             just $target
         else
-            echo "$target tests not found, skipping."
+            echo "Error: test target '$target' not found." >&2
             exit 1
         fi
     done
@@ -83,7 +83,7 @@ lint: lock
     {{uv_run}} repository.py lint
 
 # Perform type checking
-typecheck:
+typecheck: lock
     {{uv_run}} repository.py typecheck
 
 # Run action on monorepo. For a full list of actions, run `just repo`
