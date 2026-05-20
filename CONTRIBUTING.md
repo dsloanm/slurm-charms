@@ -83,7 +83,8 @@ just integration
 just integration -- --run-high-availability
 ```
 
-Note: CI will check only `just integration`. However, we strongly recommend running
+Note: CI enforces the required checks above and uses `just integration` for the
+baseline integration test suite. However, we strongly recommend running
 `just integration -- --run-high-availability` locally before submitting, as the full suite
 includes additional coverage to catch more complex cases relating to charm scaling.
 
