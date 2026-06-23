@@ -98,7 +98,7 @@ class SlurmdCharm(ops.CharmBase):
         )
 
         scrape_jobs = [NODE_EXPORTER_SCRAPE_CONFIG]
-        # FIXME: https://github.com/charmed-hpc/hpc-libs/issues/133
+        # FIXME: https://github.com/canonical/charmed-hpc-libs/issues/133
         #  Replace with `is_installed` once method is added to `SnapOpsManager`.
         try:
             if self.gpu.dcgm.exporter.is_active():
@@ -156,7 +156,7 @@ class SlurmdCharm(ops.CharmBase):
             self.slurmd.node_exporter.set_collectors(NODE_EXPORTER_COLLECTORS)
             self.slurmd.node_exporter.service.enable()
         except (SlurmOpsError, GPUOpsError, rdma.RDMAOpsError, SnapError) as e:
-            # FIXME: https://github.com/charmed-hpc/hpc-libs/issues/134
+            # FIXME: https://github.com/canonical/charmed-hpc-libs/issues/134
             #  Investigate how to provide more granular status messages
             #  such as when it's the `dcgm-exporter` snap that fails to install
             #  and not the Nvidia drivers.
@@ -261,7 +261,7 @@ class SlurmdCharm(ops.CharmBase):
         # Necessary to load new key from file into the service
         # FIXME: slurmd reloading is currently broken. Service restart is used as a workaround but
         # this breaks zero-downtime key rotation. This must be replaced with a reload
-        # See: https://github.com/charmed-hpc/slurm-charms/issues/204
+        # See: https://github.com/canonical/slurm-charms/issues/204
         self.slurmd.service.restart()
 
     @refresh

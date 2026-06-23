@@ -292,7 +292,7 @@ class _AptManager(OpsManager):
                         Restart=on-failure
                         RestartSec=10
                         """))
-                # TODO: https://github.com/charmed-hpc/hpc-libs/issues/54 -
+                # TODO: https://github.com/canonical/charmed-hpc-libs/issues/54 -
                 #   Make `sackd` create its service environment file so that we
                 #   aren't required to manually create it here.
                 _logger.debug("creating sackd environment file")
@@ -333,7 +333,7 @@ class _AptManager(OpsManager):
 
                 systemctl("disable", "--now", "munge")
             case "slurmrestd":
-                # TODO: https://github.com/charmed-hpc/hpc-libs/issues/39 -
+                # TODO: https://github.com/canonical/charmed-hpc-libs/issues/39 -
                 #   Make `slurmrestd` package preinst hook create the system user and group
                 #   so that we do not need to do it manually here.
                 _logger.debug("creating slurmrestd user and group")
@@ -465,7 +465,7 @@ class _SnapManager(OpsManager):
         snap("stop", "--disable", "slurm.munged")
 
 
-# TODO: https://github.com/charmed-hpc/hpc-libs/issues/36 -
+# TODO: https://github.com/canonical/charmed-hpc-libs/issues/36 -
 #   Use `jwtctl` to provide backend for generating, setting, and getting
 #   jwt signing key used by `slurmctld` and `slurmdbd`. This way we also
 #   won't need to pass the keyfile path to the `__init__` constructor.

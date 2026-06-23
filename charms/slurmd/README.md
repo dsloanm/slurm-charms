@@ -55,14 +55,14 @@ $ juju run --quiet slurmd/0 node-config parameters="Weight=5000" --format json |
 
 ## Project & Community
 
-The slurmd operator is a project of the [Ubuntu HPC](https://discourse.ubuntu.com/t/high-performance-computing-team/35988) 
-community. It is an open source project that is welcome to community involvement, contributions, suggestions, fixes, and 
+The slurmd operator is a project of the [Ubuntu HPC](https://discourse.ubuntu.com/t/high-performance-computing-team/35988)
+community. It is an open source project that is welcome to community involvement, contributions, suggestions, fixes, and
 constructive feedback. Interested in being involved with the development of the slurmd operator? Check out these links below:
 
 * [Join our online chat](https://matrix.to/#/#ubuntu-hpc:matrix.org)
 * [Contributing guidelines](./CONTRIBUTING.md)
 * [Code of conduct](https://ubuntu.com/community/ethos/code-of-conduct)
-* [File a bug report](https://github.com/omnivector-solutions/slurmctld-operator/issues)
+* [File a bug report](https://github.com/canonical/slurm-charms/issues)
 * [Juju SDK docs](https://juju.is/docs/sdk)
 
 ## License

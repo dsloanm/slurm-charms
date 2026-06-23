@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   backport:
-    uses: charmed-hpc/.github/.github/workflows/backport.yaml@main
+    uses: canonical/hpc-team/.github/workflows/backport.yaml@main
     with:
       branches: '["track/25.11"]'
     secrets: inherit
