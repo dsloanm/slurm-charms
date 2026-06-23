@@ -890,7 +890,7 @@ class SlurmctldCharm(ops.CharmBase):
             )
 
         if self.slurmrestd.is_joined():
-            # Workaround for: https://github.com/charmed-hpc/slurm-charms/issues/203
+            # Workaround for: https://github.com/canonical/slurm-charms/issues/203
             # TODO: Remove setting of key ID once merging of databag info is implemented. Only the
             # slurmconfig needs updated. The auth Secret ID should not be overwritten
             auth_secret_id = self.model.get_secret(label=AUTH_KEY_LABEL).get_info().id

@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: charmed-hpc/.github/.github/workflows/charmed-hpc-ci.yaml@main
+    uses: canonical/hpc-team/.github/workflows/charmed-hpc-ci.yaml@main
     with:
       run-test: false
       setup-commands: &setup_cmds |
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: charmed-hpc/.github/.github/actions/setup-just@main
+      - uses: canonical/hpc-team/.github/actions/setup-just@main
       - run: *setup_cmds
       - run: just unit
 
@@ -78,7 +78,7 @@ jobs:
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
       - uses: actions/checkout@v4
-      - uses: charmed-hpc/.github/.github/actions/setup-just@main
+      - uses: canonical/hpc-team/.github/actions/setup-just@main
       - run: *setup_cmds
       - uses: charmed-kubernetes/actions-operator@main
         with:

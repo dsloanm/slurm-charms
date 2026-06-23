@@ -1,8 +1,8 @@
 # Slurm charms
 
-[![CI](https://github.com/charmed-hpc/slurm-charms/actions/workflows/ci.yaml/badge.svg)](https://github.com/charmed-hpc/slurm-charms/actions/workflows/ci.yaml/badge.svg)
-[![Release](https://github.com/charmed-hpc/slurm-charms/actions/workflows/release.yaml/badge.svg)](https://github.com/charmed-hpc/slurm-charms/actions/workflows/release.yaml/badge.svg)
-![GitHub License](https://img.shields.io/github/license/charmed-hpc/slurm-charms)
+[![CI](https://github.com/canonical/slurm-charms/actions/workflows/ci.yaml/badge.svg)](https://github.com/canonical/slurm-charms/actions/workflows/ci.yaml/badge.svg)
+[![Release](https://github.com/canonical/slurm-charms/actions/workflows/release.yaml/badge.svg)](https://github.com/canonical/slurm-charms/actions/workflows/release.yaml/badge.svg)
+![GitHub License](https://img.shields.io/github/license/canonical/slurm-charms)
 [![Matrix](https://img.shields.io/matrix/ubuntu-hpc%3Amatrix.org?logo=matrix&label=ubuntu-hpc)](https://matrix.to/#/#hpc:ubuntu.com)
 
 [Juju](https://juju.is) charms for automating the Day 0 to Day 2 operations of the [Slurm workload manager](https://slurm.schedmd.com/overview.html) ⚖️🐧
@@ -42,8 +42,7 @@ juju integrate slurmdbd:database slurmdbd-mysql-router:database
 If you want to learn more about all the things you can do with the Slurm charms, here are some resources for you to explore:
 
 * [Documentation](https://canonical-charmed-hpc.readthedocs-hosted.com/latest)
-* [Open an issue](https://github.com/charmed-hpc/slurm-charms/issues/new?title=ISSUE+TITLE&body=*Please+describe+your+issue*)
-* [Ask a question on Github](https://github.com/orgs/charmed-hpc/discussions/categories/q-a)
+* [Open an issue](https://github.com/canonical/slurm-charms/issues/new?title=ISSUE+TITLE&body=*Please+describe+your+issue*)
 
 ## 🛠️ Development
 
@@ -85,7 +84,6 @@ Here’s some links to help you get started with joining the community:
 * [Contributing guidelines](./CONTRIBUTING.md)
 * [Join the conversation on Matrix](https://matrix.to/#/#hpc:ubuntu.com)
 * [Get the latest news on Discourse](https://discourse.ubuntu.com/c/hpc/151)
-* [Ask and answer questions on GitHub](https://github.com/orgs/charmed-hpc/discussions/categories/q-a)
 
 ## 📋 License
 
