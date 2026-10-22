@@ -415,6 +415,13 @@ class SlurmManager(ABC, AptLifecycleManager):
             SlurmOpsError: Raised if the managed Slurm service fails to reconfigure.
         """
         try:
+            # Reset systemd start-rate-limit before deliberate restarts to prevent tripping
+            # StartLimitBurst during frequent config changes. Auto-restarts still catch crash loops.
+            #
+            # `check=False` because `systemctl reset-failed` exits non-zero when the unit is
+            # not currently loaded (e.g. stopped during initial deploy), and there is no
+            # start-limit state to clear in that case.
+            systemctl("reset-failed", self._service, check=False)
             self.service.enable()
             self.service.restart()
         except SystemdError as e:
